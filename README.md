@@ -43,6 +43,7 @@ Options:
   --type <Texture2D|Sprite|etc..>                         Specify unity class type(s)
   --filter <filter>                                       Specify regex filter(s).
   --game <BH3|CB1|CB2|CB3|GI|SR|TOT|ZZZ> (REQUIRED)       Specify Game.
+  --image_format <Png|Jpeg|Bmp|Webp>                      Specify texture export format. [default: Png]
   --map_op <AssetMap|Both|CABMap|None>                    Specify which map to build. [default: None]
   --map_type <JSON|XML>                                   AssetMap output type. [default: XML]
   --map_name <map_name>                                   Specify AssetMap file name.

@@ -9,12 +9,12 @@ namespace AssetStudio.CLI
 {
     internal static class Exporter
     {
-        public static bool ExportTexture2D(AssetItem item, string exportPath)
+        public static bool ExportTexture2D(AssetItem item, string exportPath, ImageFormat imageFormat = ImageFormat.Png)
         {
             var m_Texture2D = (Texture2D)item.Asset;
             if (Properties.Settings.Default.convertTexture)
             {
-                var type = Properties.Settings.Default.convertType;
+                var type = imageFormat;
                 if (!TryExportFile(exportPath, item, "." + type.ToString().ToLower(), out var exportFullPath))
                     return false;
                 var image = m_Texture2D.ConvertToImage(true);
@@ -269,9 +269,9 @@ namespace AssetStudio.CLI
             return true;
         }
 
-        public static bool ExportSprite(AssetItem item, string exportPath)
+        public static bool ExportSprite(AssetItem item, string exportPath, ImageFormat imageFormat = ImageFormat.Png)
         {
-            var type = Properties.Settings.Default.convertType;
+            var type = imageFormat;
             if (!TryExportFile(exportPath, item, "." + type.ToString().ToLower(), out var exportFullPath))
                 return false;
             var image = ((Sprite)item.Asset).GetImage();
@@ -348,7 +348,7 @@ namespace AssetStudio.CLI
                 return false;
             var m_AnimationClip = (AnimationClip)item.Asset;
             var str = m_AnimationClip.Convert();
-            if (string.IsNullOrEmpty(str)) 
+            if (string.IsNullOrEmpty(str))
                 return false;
             File.WriteAllText(exportFullPath, str);
             return true;
@@ -387,7 +387,7 @@ namespace AssetStudio.CLI
             return true;
         }
 
-        public static bool ExportGameObject(AssetItem item, string exportPath, List <AssetItem> animationList = null)
+        public static bool ExportGameObject(AssetItem item, string exportPath, List<AssetItem> animationList = null)
         {
             if (!TryExportFolder(exportPath, item, out var exportFullPath))
                 return false;
@@ -411,7 +411,7 @@ namespace AssetStudio.CLI
             var convert = animationList != null
                 ? new ModelConverter(gameObject, options, animationList.Select(x => (AnimationClip)x.Asset).ToArray())
                 : new ModelConverter(gameObject, options);
-            
+
             if (convert.MeshList.Count == 0)
             {
                 Logger.Info($"GameObject {gameObject.m_Name} has no mesh, skipping...");
@@ -464,14 +464,14 @@ namespace AssetStudio.CLI
             return false;
         }
 
-        public static bool ExportConvertFile(AssetItem item, string exportPath)
+        public static bool ExportConvertFile(AssetItem item, string exportPath, ImageFormat imageFormat = ImageFormat.Png)
         {
             switch (item.Type)
             {
                 case ClassIDType.GameObject:
                     return ExportGameObject(item, exportPath);
                 case ClassIDType.Texture2D:
-                    return ExportTexture2D(item, exportPath);
+                    return ExportTexture2D(item, exportPath, imageFormat);
                 case ClassIDType.AudioClip:
                     return ExportAudioClip(item, exportPath);
                 case ClassIDType.Shader:
@@ -489,7 +489,7 @@ namespace AssetStudio.CLI
                 case ClassIDType.MovieTexture:
                     return ExportMovieTexture(item, exportPath);
                 case ClassIDType.Sprite:
-                    return ExportSprite(item, exportPath);
+                    return ExportSprite(item, exportPath, imageFormat);
                 case ClassIDType.Animator:
                     return ExportAnimator(item, exportPath);
                 case ClassIDType.AnimationClip:

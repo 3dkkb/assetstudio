@@ -34,6 +34,7 @@ namespace AssetStudio.CLI
                 optionsBinder.UnityVersion,
                 optionsBinder.GroupAssetsType,
                 optionsBinder.AssetExportType,
+                optionsBinder.ImageFormat,
                 optionsBinder.Key,
                 optionsBinder.AIFile,
                 optionsBinder.DummyDllFolder,
@@ -61,6 +62,7 @@ namespace AssetStudio.CLI
         public string UnityVersion { get; set; }
         public AssetGroupOption GroupAssetsType { get; set; }
         public ExportType AssetExportType { get; set; }
+        public ImageFormat ImageFormat { get; set; }
         public byte Key { get; set; }
         public FileInfo AIFile { get; set; }
         public DirectoryInfo DummyDllFolder { get; set; }
@@ -83,6 +85,7 @@ namespace AssetStudio.CLI
         public readonly Option<string> UnityVersion;
         public readonly Option<AssetGroupOption> GroupAssetsType;
         public readonly Option<ExportType> AssetExportType;
+        public readonly Option<ImageFormat> ImageFormat;
         public readonly Option<byte> Key;
         public readonly Option<FileInfo> AIFile;
         public readonly Option<DirectoryInfo> DummyDllFolder;
@@ -94,7 +97,7 @@ namespace AssetStudio.CLI
             Silent = new Option<bool>("--silent", "Hide log messages.");
             LoggerFlags = new Option<LoggerEvent[]>("--logger_flags", "Flags to control toggle log events.") { AllowMultipleArgumentsPerToken = true, ArgumentHelpName = "Verbose|Debug|Info|etc.." };
             TypeFilter = new Option<string[]>("--types", "Specify unity class type(s)") { AllowMultipleArgumentsPerToken = true, ArgumentHelpName = "Texture2D|Shader:Parse|Sprite:Both|etc.." };
-            NameFilter = new Option<Regex[]>("--names", result => 
+            NameFilter = new Option<Regex[]>("--names", result =>
             {
                 var items = new List<Regex>();
                 var value = result.Tokens.Single().Value;
@@ -124,7 +127,8 @@ namespace AssetStudio.CLI
                 }
 
                 return items.ToArray();
-            }, false, "Specify name regex filter(s).") { AllowMultipleArgumentsPerToken = true };
+            }, false, "Specify name regex filter(s).")
+            { AllowMultipleArgumentsPerToken = true };
             ContainerFilter = new Option<Regex[]>("--containers", result =>
             {
                 var items = new List<Regex>();
@@ -132,7 +136,7 @@ namespace AssetStudio.CLI
                 if (File.Exists(value))
                 {
                     var lines = File.ReadLines(value);
-                    foreach(var line in lines)
+                    foreach (var line in lines)
                     {
                         if (string.IsNullOrWhiteSpace(line))
                         {
@@ -155,7 +159,8 @@ namespace AssetStudio.CLI
                 }
 
                 return items.ToArray();
-            }, false, "Specify container regex filter(s).") { AllowMultipleArgumentsPerToken = true };
+            }, false, "Specify container regex filter(s).")
+            { AllowMultipleArgumentsPerToken = true };
             GameName = new Option<string>("--game", $"Specify Game.") { IsRequired = true };
             KeyIndex = new Option<int>("--key_index", "Specify key index.") { ArgumentHelpName = UnityCNManager.ToString() };
             MapOp = new Option<MapOpType>("--map_op", "Specify which map to build.");
@@ -164,6 +169,7 @@ namespace AssetStudio.CLI
             UnityVersion = new Option<string>("--unity_version", "Specify Unity version.");
             GroupAssetsType = new Option<AssetGroupOption>("--group_assets", "Specify how exported assets should be grouped.");
             AssetExportType = new Option<ExportType>("--export_type", "Specify how assets should be exported.");
+            ImageFormat = new Option<ImageFormat>("--image_format", "Specify texture export format (Png, Jpeg, Bmp, Webp).");
             AIFile = new Option<FileInfo>("--ai_file", "Specify asset_index json file path (to recover GI containers).").LegalFilePathsOnly();
             DummyDllFolder = new Option<DirectoryInfo>("--dummy_dlls", "Specify DummyDll path.").LegalFilePathsOnly();
             Input = new Argument<FileInfo>("input_path", "Input file/folder.").LegalFilePathsOnly();
@@ -196,11 +202,12 @@ namespace AssetStudio.CLI
             LoggerFlags.SetDefaultValue(new LoggerEvent[] { LoggerEvent.Debug, LoggerEvent.Info, LoggerEvent.Warning, LoggerEvent.Error });
             GroupAssetsType.SetDefaultValue(AssetGroupOption.ByType);
             AssetExportType.SetDefaultValue(ExportType.Convert);
+            ImageFormat.SetDefaultValue(AssetStudio.ImageFormat.Png);
             MapOp.SetDefaultValue(MapOpType.None);
             MapType.SetDefaultValue(ExportListType.XML);
             KeyIndex.SetDefaultValue(0);
         }
-        
+
         public byte ParseKey(string value)
         {
             if (value.StartsWith("0x"))
@@ -253,6 +260,7 @@ namespace AssetStudio.CLI
             UnityVersion = bindingContext.ParseResult.GetValueForOption(UnityVersion),
             GroupAssetsType = bindingContext.ParseResult.GetValueForOption(GroupAssetsType),
             AssetExportType = bindingContext.ParseResult.GetValueForOption(AssetExportType),
+            ImageFormat = bindingContext.ParseResult.GetValueForOption(ImageFormat),
             Key = bindingContext.ParseResult.GetValueForOption(Key),
             AIFile = bindingContext.ParseResult.GetValueForOption(AIFile),
             DummyDllFolder = bindingContext.ParseResult.GetValueForOption(DummyDllFolder),

@@ -278,7 +278,7 @@ namespace AssetStudio.CLI
             exportableAssets.AddRange(matches);
         }
 
-        public static void ProcessAssetData(Object asset, Dictionary<Object, AssetItem> objectAssetItemDic, List<(PPtr<Object>, string)> mihoyoBinDataNames, List<(PPtr<Object>, string)> containers, ref int i) 
+        public static void ProcessAssetData(Object asset, Dictionary<Object, AssetItem> objectAssetItemDic, List<(PPtr<Object>, string)> mihoyoBinDataNames, List<(PPtr<Object>, string)> containers, ref int i)
         {
             var assetItem = new AssetItem(asset);
             objectAssetItemDic.Add(asset, assetItem);
@@ -361,7 +361,7 @@ namespace AssetStudio.CLI
             }
         }
 
-        public static void ExportAssets(string savePath, List<AssetItem> toExportAssets, AssetGroupOption assetGroupOption, ExportType exportType)
+        public static void ExportAssets(string savePath, List<AssetItem> toExportAssets, AssetGroupOption assetGroupOption, ExportType exportType, ImageFormat imageFormat = ImageFormat.Png)
         {
             int toExportCount = toExportAssets.Count;
             int exportedCount = 0;
@@ -416,7 +416,7 @@ namespace AssetStudio.CLI
                             }
                             break;
                         case ExportType.Convert:
-                            if (ExportConvertFile(asset, exportPath))
+                            if (ExportConvertFile(asset, exportPath, imageFormat))
                             {
                                 exportedCount++;
                             }
