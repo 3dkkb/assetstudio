@@ -34,28 +34,47 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore AssetStudio.sln
       
+    - name: Build CLI (net8.0-windows)
+      run: dotnet build AssetStudio.CLI/AssetStudio.CLI.csproj -c Release -f net8.0-windows --no-restore
+      
+    - name: Build GUI (net8.0-windows)
+      run: dotnet build AssetStudio.GUI/AssetStudio.GUI.csproj -c Release -f net8.0-windows --no-restore
+      
     - name: Build CLI (net10.0-windows)
       run: dotnet build AssetStudio.CLI/AssetStudio.CLI.csproj -c Release -f net10.0-windows --no-restore
       
     - name: Build GUI (net10.0-windows)
       run: dotnet build AssetStudio.GUI/AssetStudio.GUI.csproj -c Release -f net10.0-windows --no-restore
       
-    - name: Prepare Release Package
+    - name: Prepare .NET 8 Release Package
       run: |
-        mkdir release
-        Get-ChildItem "AssetStudio.GUI/bin/Release/net10.0-windows" -Recurse | Where-Object { $_.Extension -ne ".pdb" } | ForEach-Object {
-          $dest = $_.FullName.Replace((Resolve-Path "AssetStudio.GUI/bin/Release/net10.0-windows").Path, (Resolve-Path "release").Path)
+        mkdir release-net8
+        Get-ChildItem "AssetStudio.GUI/bin/Release/net8.0-windows" -Recurse | Where-Object { $_.Extension -ne ".pdb" } | ForEach-Object {
+          $dest = $_.FullName.Replace((Resolve-Path "AssetStudio.GUI/bin/Release/net8.0-windows").Path, (Resolve-Path "release-net8").Path)
           $destDir = Split-Path $dest -Parent
           if (!(Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
           Copy-Item $_.FullName -Destination $dest -Force
         }
-        Compress-Archive -Path "release/*" -DestinationPath "AssetStudio-net10.0-win.zip"
+        Compress-Archive -Path "release-net8/*" -DestinationPath "AssetStudio-net8.0-win.zip"
+      shell: pwsh
+      
+    - name: Prepare .NET 10 Release Package
+      run: |
+        mkdir release-net10
+        Get-ChildItem "AssetStudio.GUI/bin/Release/net10.0-windows" -Recurse | Where-Object { $_.Extension -ne ".pdb" } | ForEach-Object {
+          $dest = $_.FullName.Replace((Resolve-Path "AssetStudio.GUI/bin/Release/net10.0-windows").Path, (Resolve-Path "release-net10").Path)
+          $destDir = Split-Path $dest -Parent
+          if (!(Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+          Copy-Item $_.FullName -Destination $dest -Force
+        }
+        Compress-Archive -Path "release-net10/*" -DestinationPath "AssetStudio-net10.0-win.zip"
       shell: pwsh
       
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         files: |
+          AssetStudio-net8.0-win.zip
           AssetStudio-net10.0-win.zip
         draft: false
         prerelease: false
@@ -64,13 +83,19 @@ jobs:
           ## AssetStudio Release ${{ github.ref_name }}
           
           ### What's Included
-          Complete package with both CLI and GUI executables:
+          Two packages available - choose based on your installed .NET Runtime:
+          
+          **AssetStudio-net8.0-win.zip** (Recommended for most users)
+          - Requires [.NET 8 Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) (Desktop Runtime)
+          - LTS support until November 2026
+          
+          **AssetStudio-net10.0-win.zip** (Latest)
+          - Requires [.NET 10 Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) (Desktop Runtime)
+          - LTS support until November 2028
+          
+          Both packages contain:
           - **AssetStudio.GUI.exe**: Visual interface for interactive use
           - **AssetStudio.CLI.exe**: Command-line tool for automation and batch processing
-          
-          ### Requirements
-          - Windows OS
-          - [.NET 10 Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) (Desktop Runtime)
           
           ### Unity Support
           - Unity 2.x through Unity 6 (6000.0 - 6000.4+)
