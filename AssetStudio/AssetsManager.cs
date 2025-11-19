@@ -25,6 +25,8 @@ namespace AssetStudio
         public bool SkipProcess = false;
         public bool ResolveDependencies = false;
         public string SpecifyUnityVersion;
+        public string DefaultVersion; // Fallback version for stripped files
+        private string detectedFolderVersion; // Version detected from globalgamemanagers or bundles
         public CancellationTokenSource tokenSource = new CancellationTokenSource();
         public List<SerializedFile> assetsFileList = new List<SerializedFile>();
 
@@ -45,6 +47,9 @@ namespace AssetStudio
             }
 
             var path = Path.GetDirectoryName(Path.GetFullPath(files[0]));
+            // Priority 3: Scan for globalgamemanagers or data.unity3d to detect Unity version
+            DetectUnityVersionFromFolder(path);
+
             MergeSplitAssets(path);
             var toReadFile = ProcessingSplitFiles(files.ToList());
             if (ResolveDependencies)
@@ -65,6 +70,9 @@ namespace AssetStudio
                 Logger.Silent = true;
                 Progress.Silent = true;
             }
+
+            // Priority 3: Scan for globalgamemanagers or data.unity3d to detect Unity version
+            DetectUnityVersionFromFolder(path);
 
             MergeSplitAssets(path, true);
             var files = Directory.GetFiles(path, "*.*", SearchOption.AllDirectories).ToList();
@@ -111,6 +119,109 @@ namespace AssetStudio
                 ReadAssets();
                 ProcessAssets();
             }
+        }
+
+        /// <summary>
+        /// Priority 3: Detect Unity version from globalgamemanagers or data.unity3d files
+        /// </summary>
+        private void DetectUnityVersionFromFolder(string path)
+        {
+            if (!string.IsNullOrEmpty(detectedFolderVersion))
+            {
+                return; // Already detected
+            }
+
+            try
+            {
+                // Look for globalgamemanagers file (common in PC builds)
+                var globalGameManagersFiles = Directory.GetFiles(path, "globalgamemanagers", SearchOption.AllDirectories);
+                if (globalGameManagersFiles.Length > 0)
+                {
+                    Logger.Verbose($"Found globalgamemanagers at {globalGameManagersFiles[0]}, attempting to extract version");
+                    detectedFolderVersion = TryExtractVersionFromFile(globalGameManagersFiles[0]);
+                    if (!string.IsNullOrEmpty(detectedFolderVersion))
+                    {
+                        Logger.Info($"Detected Unity version from globalgamemanagers: {detectedFolderVersion}");
+                        return;
+                    }
+                }
+
+                // Look for data.unity3d bundle (common in WebGL/mobile builds)
+                var dataUnity3dFiles = Directory.GetFiles(path, "data.unity3d", SearchOption.AllDirectories);
+                if (dataUnity3dFiles.Length > 0)
+                {
+                    Logger.Verbose($"Found data.unity3d at {dataUnity3dFiles[0]}, attempting to extract version");
+                    detectedFolderVersion = TryExtractVersionFromBundle(dataUnity3dFiles[0]);
+                    if (!string.IsNullOrEmpty(detectedFolderVersion))
+                    {
+                        Logger.Info($"Detected Unity version from data.unity3d: {detectedFolderVersion}");
+                        return;
+                    }
+                }
+
+                // Try any .unity3d bundle files
+                var bundleFiles = Directory.GetFiles(path, "*.unity3d", SearchOption.TopDirectoryOnly);
+                foreach (var bundleFile in bundleFiles.Take(3)) // Check first 3 bundles
+                {
+                    Logger.Verbose($"Checking bundle {bundleFile} for Unity version");
+                    detectedFolderVersion = TryExtractVersionFromBundle(bundleFile);
+                    if (!string.IsNullOrEmpty(detectedFolderVersion))
+                    {
+                        Logger.Info($"Detected Unity version from {Path.GetFileName(bundleFile)}: {detectedFolderVersion}");
+                        return;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Verbose($"Error detecting Unity version from folder: {e.Message}");
+            }
+        }
+
+        private string TryExtractVersionFromFile(string filePath)
+        {
+            try
+            {
+                using (var reader = new FileReader(filePath))
+                {
+                    if (reader.FileType == FileType.AssetsFile)
+                    {
+                        var tempFile = new SerializedFile(reader, this);
+                        if (!tempFile.IsVersionStripped)
+                        {
+                            return tempFile.unityVersion;
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Verbose($"Error reading {filePath}: {e.Message}");
+            }
+            return null;
+        }
+
+        private string TryExtractVersionFromBundle(string filePath)
+        {
+            try
+            {
+                using (var reader = new FileReader(filePath))
+                {
+                    if (reader.FileType == FileType.BundleFile)
+                    {
+                        var bundleFile = new BundleFile(reader, Game);
+                        if (!string.IsNullOrEmpty(bundleFile.m_Header.unityRevision))
+                        {
+                            return bundleFile.m_Header.unityRevision;
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Verbose($"Error reading bundle {filePath}: {e.Message}");
+            }
+            return null;
         }
 
         private void LoadFile(string fullName)
@@ -249,6 +360,15 @@ namespace AssetStudio
             try
             {
                 var bundleFile = new BundleFile(reader, Game);
+
+                // Priority 2: Extract Unity version from bundle header if available
+                if (!string.IsNullOrEmpty(bundleFile.m_Header.unityRevision) &&
+                    string.IsNullOrEmpty(detectedFolderVersion))
+                {
+                    detectedFolderVersion = bundleFile.m_Header.unityRevision;
+                    Logger.Info($"Detected Unity version from bundle: {detectedFolderVersion}");
+                }
+
                 foreach (var file in bundleFile.fileList)
                 {
                     var dummyPath = Path.Combine(Path.GetDirectoryName(reader.FullPath), file.fileName);
@@ -579,6 +699,20 @@ namespace AssetStudio
         {
             if (assetsFile.IsVersionStripped && string.IsNullOrEmpty(SpecifyUnityVersion))
             {
+                // Priority 1 & 3: Use detected folder version or DefaultVersion as fallback
+                if (!string.IsNullOrEmpty(detectedFolderVersion))
+                {
+                    Logger.Info($"Using detected Unity version for {assetsFile.fileName}: {detectedFolderVersion}");
+                    assetsFile.SetVersion(detectedFolderVersion);
+                    return;
+                }
+                else if (!string.IsNullOrEmpty(DefaultVersion))
+                {
+                    Logger.Info($"Using default Unity version for {assetsFile.fileName}: {DefaultVersion}");
+                    assetsFile.SetVersion(DefaultVersion);
+                    return;
+                }
+
                 // Try to prompt user for version if event is subscribed
                 if (OnVersionPrompt != null)
                 {
