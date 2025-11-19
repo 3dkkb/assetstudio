@@ -34,13 +34,21 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore AssetStudio.sln
       
-    - name: Build Solution (net10.0-windows)
+    - name: Build CLI (net10.0-windows)
+      run: dotnet build AssetStudio.CLI/AssetStudio.CLI.csproj -c Release -f net10.0-windows --no-restore
+      
+    - name: Build GUI (net10.0-windows)
       run: dotnet build AssetStudio.GUI/AssetStudio.GUI.csproj -c Release -f net10.0-windows --no-restore
       
     - name: Prepare Release Package
       run: |
         mkdir release
-        Copy-Item -Path "AssetStudio.GUI/bin/Release/net10.0-windows/*" -Destination "release/" -Recurse -Exclude "*.pdb"
+        Get-ChildItem "AssetStudio.GUI/bin/Release/net10.0-windows" -Recurse | Where-Object { $_.Extension -ne ".pdb" } | ForEach-Object {
+          $dest = $_.FullName.Replace((Resolve-Path "AssetStudio.GUI/bin/Release/net10.0-windows").Path, (Resolve-Path "release").Path)
+          $destDir = Split-Path $dest -Parent
+          if (!(Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+          Copy-Item $_.FullName -Destination $dest -Force
+        }
         Compress-Archive -Path "release/*" -DestinationPath "AssetStudio-net10.0-win.zip"
       shell: pwsh
       
