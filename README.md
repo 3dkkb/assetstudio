@@ -87,6 +87,7 @@ NOTES:
 Special Thank to:
 
 - Perfare: Original author.
+- Razmoth (Raz): Creator of [RazTools/Studio](https://github.com/RazTools/Studio) updated fork.
 - Khang06: [Project](https://github.com/khang06/genshinblkstuff) for extraction.
 - Radioegor146: [Asset-indexes](https://github.com/radioegor146/gi-asset-indexes) for recovered/updated asset_index's.
 - Ds5678: [AssetRipper](https://github.com/AssetRipper/AssetRipper)[[discord](https://discord.gg/XqXa53W2Yh)] for information about Asset Formats & Parsing.
