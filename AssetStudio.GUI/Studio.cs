@@ -294,7 +294,7 @@ namespace AssetStudio.GUI
                             exportable = ClassIDType.AssetBundle.CanExport();
                             break;
                         case IndexObject m_IndexObject:
-                            foreach(var index in m_IndexObject.AssetMap)
+                            foreach (var index in m_IndexObject.AssetMap)
                             {
                                 mihoyoBinDataNames.Add((index.Value.Object, index.Key));
                             }
@@ -334,7 +334,7 @@ namespace AssetStudio.GUI
                     Progress.Report(++i, objectCount);
                 }
             }
-            foreach((var pptr, var name) in mihoyoBinDataNames)
+            foreach ((var pptr, var name) in mihoyoBinDataNames)
             {
                 if (assetsManager.tokenSource.IsCancellationRequested)
                 {
@@ -537,7 +537,13 @@ namespace AssetStudio.GUI
                 int exportedCount = 0;
                 int i = 0;
                 Progress.Reset();
-                foreach (var asset in toExportAssets)
+
+                var parallelOptions = new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = Environment.ProcessorCount
+                };
+
+                Parallel.ForEach(toExportAssets, parallelOptions, asset =>
                 {
                     string exportPath;
                     switch ((AssetGroupOption)Properties.Settings.Default.assetGroupOption)
@@ -570,35 +576,32 @@ namespace AssetStudio.GUI
                             break;
                     }
                     exportPath += Path.DirectorySeparatorChar;
-                    StatusStripUpdate($"[{exportedCount}/{toExportCount}] Exporting {asset.TypeString}: {asset.Text}");
+
+                    var currentCount = Interlocked.Increment(ref i);
+                    StatusStripUpdate($"[{currentCount}/{toExportCount}] Exporting {asset.TypeString}: {asset.Text}");
+
                     try
                     {
+                        bool exported = false;
                         switch (exportType)
                         {
                             case ExportType.Raw:
-                                if (ExportRawFile(asset, exportPath))
-                                {
-                                    exportedCount++;
-                                }
+                                exported = ExportRawFile(asset, exportPath);
                                 break;
                             case ExportType.Dump:
-                                if (ExportDumpFile(asset, exportPath))
-                                {
-                                    exportedCount++;
-                                }
+                                exported = ExportDumpFile(asset, exportPath);
                                 break;
                             case ExportType.Convert:
-                                if (ExportConvertFile(asset, exportPath))
-                                {
-                                    exportedCount++;
-                                }
+                                exported = ExportConvertFile(asset, exportPath);
                                 break;
                             case ExportType.JSON:
-                                if (ExportJSONFile(asset, exportPath))
-                                {
-                                    exportedCount++;
-                                }
+                                exported = ExportJSONFile(asset, exportPath);
                                 break;
+                        }
+
+                        if (exported)
+                        {
+                            Interlocked.Increment(ref exportedCount);
                         }
                     }
                     catch (Exception ex)
@@ -606,8 +609,8 @@ namespace AssetStudio.GUI
                         Logger.Error($"Export {asset.Type}:{asset.Text} error\r\n{ex.Message}\r\n{ex.StackTrace}");
                     }
 
-                    Progress.Report(++i, toExportCount);
-                }
+                    Progress.Report(currentCount, toExportCount);
+                });
 
                 var statusText = exportedCount == 0 ? "Nothing exported." : $"Finished exporting {exportedCount} assets.";
 
@@ -699,7 +702,7 @@ namespace AssetStudio.GUI
                         }
                         //处理非法文件名
                         var filename = FixFileName(j.Text);
-                        if (node.Parent != null) 
+                        if (node.Parent != null)
                         {
                             filename = Path.Combine(FixFileName(node.Parent.Text), filename);
                         }
@@ -741,7 +744,7 @@ namespace AssetStudio.GUI
 
                 IEnumerable<TreeNode> GetNodes(TreeNodeCollection nodes)
                 {
-                    foreach(TreeNode node in nodes)
+                    foreach (TreeNode node in nodes)
                     {
                         var subNodes = node.Nodes.OfType<TreeNode>().ToArray();
                         if (subNodes.Length == 0)

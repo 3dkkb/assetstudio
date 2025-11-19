@@ -8,6 +8,8 @@ using System.Text.RegularExpressions;
 using static AssetStudio.CLI.Exporter;
 using System.Globalization;
 using System.Xml;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace AssetStudio.CLI
 {
@@ -365,7 +367,14 @@ namespace AssetStudio.CLI
         {
             int toExportCount = toExportAssets.Count;
             int exportedCount = 0;
-            foreach (var asset in toExportAssets)
+            int currentIndex = 0;
+
+            var parallelOptions = new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Environment.ProcessorCount
+            };
+
+            Parallel.ForEach(toExportAssets, parallelOptions, asset =>
             {
                 string exportPath;
                 switch (assetGroupOption)
@@ -398,42 +407,39 @@ namespace AssetStudio.CLI
                         break;
                 }
                 exportPath += Path.DirectorySeparatorChar;
-                Logger.Info($"[{exportedCount}/{toExportCount}] Exporting {asset.TypeString}: {asset.Text}");
+
+                var current = Interlocked.Increment(ref currentIndex);
+                Logger.Info($"[{current}/{toExportCount}] Exporting {asset.TypeString}: {asset.Text}");
+
                 try
                 {
+                    bool exported = false;
                     switch (exportType)
                     {
                         case ExportType.Raw:
-                            if (ExportRawFile(asset, exportPath))
-                            {
-                                exportedCount++;
-                            }
+                            exported = ExportRawFile(asset, exportPath);
                             break;
                         case ExportType.Dump:
-                            if (ExportDumpFile(asset, exportPath))
-                            {
-                                exportedCount++;
-                            }
+                            exported = ExportDumpFile(asset, exportPath);
                             break;
                         case ExportType.Convert:
-                            if (ExportConvertFile(asset, exportPath, imageFormat))
-                            {
-                                exportedCount++;
-                            }
+                            exported = ExportConvertFile(asset, exportPath, imageFormat);
                             break;
                         case ExportType.JSON:
-                            if (ExportJSONFile(asset, exportPath))
-                            {
-                                exportedCount++;
-                            }
+                            exported = ExportJSONFile(asset, exportPath);
                             break;
+                    }
+
+                    if (exported)
+                    {
+                        Interlocked.Increment(ref exportedCount);
                     }
                 }
                 catch (Exception ex)
                 {
                     Logger.Error($"Export {asset.Type}:{asset.Text} error\r\n{ex.Message}\r\n{ex.StackTrace}");
                 }
-            }
+            });
 
             var statusText = exportedCount == 0 ? "Nothing exported." : $"Finished exporting {exportedCount} assets.";
 
