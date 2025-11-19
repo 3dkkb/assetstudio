@@ -26,6 +26,7 @@ Note: Requires Internet connection to fetch asset_index jsons.
 ## Features
 
 ### Performance
+
 - **Parallel Asset Export**: Multi-threaded export engine utilizing all CPU cores for 2-8x faster export speeds
 - Optimized for batch processing large asset collections
 - Thread-safe file operations prevent data corruption
@@ -43,6 +44,7 @@ Note: Requires Internet connection to fetch asset_index jsons.
 - Known limitation: Some platform-specific texture compression formats may not decode correctly
 
 ### User Experience
+
 - **Interactive Version Prompt**: Automatic dialog for stripped Unity versions - no more error floods
 - Version input applies globally to all subsequent files in batch operations
 
