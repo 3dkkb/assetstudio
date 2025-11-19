@@ -1,19 +1,25 @@
-# Studio
+# Unity Extractor Utility Asset Studio (updated)
 
-# NOTICE: Project has been temporarily suspended till further notice.
+A Unity asset extraction tool supporting Unity 2.x through Unity 6.
 
-Check out the [original AssetStudio project](https://github.com/Perfare/AssetStudio) for more information.
+## Project History
+
+This project has evolved through several iterations:
+
+1. **Original**: [Perfare/AssetStudio](https://github.com/Perfare/AssetStudio) - The original AssetStudio project
+2. **Fork**: [RazTools/Studio](https://github.com/RazTools/Studio) - Enhanced version with additional features
+3. **Current**: Both upstream projects have paused active development, so we continue maintaining and updating this fork independently
 
 Note: Requires Internet connection to fetch asset_index jsons.
 
 ## Unity Version Support
 
-**Supported Versions**: Unity 2.x through Unity 6 (6000.0.58f2)
+**Supported Versions**: Unity 2.x through Unity 6 (all 6000.x versions including 6000.0 - 6000.4+)
 
 ### Unity 6 Support (Added November 2025)
 
-- Full support for Unity 6000.0.x series (Unity 6)
-- Version parsing handles new 6000.x.y format
+- Full support for Unity 6000.0.x - 6000.4.x series (Unity 6 / Unity 6.1 / Unity 6.2 / Unity 6.3 / Unity 6.4)
+- Version parsing handles new 6000.x.y format (replaces year-based 2023.x naming)
 - Texture serialization updated for Unity 2023.2+ format changes (removed `m_ForcedFallbackFormat` and `m_DownscaleFallback` fields)
 - Bundle loading, asset enumeration, and texture decoding all functional
 - Known limitation: Some platform-specific texture compression formats may not decode correctly
