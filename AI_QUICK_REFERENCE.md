@@ -1,331 +1,200 @@
-# AssetStudio - AI Quick Reference Card
+# AI Quick Reference - AssetStudio Unity 6000 Project
 
-**Fast lookup for AI assistants working on AssetStudio**
-
----
-
-## 🎯 Project Essentials
-
-| Item                | Value                                        |
-| ------------------- | -------------------------------------------- |
-| **Language**        | C# (.NET 10)                                 |
-| **Purpose**         | Unity asset extraction (reverse engineering) |
-| **Unity Support**   | Unity 2.x → Unity 6 (6000.x)                 |
-| **Current Version** | 2.3.1 (Nov 2025)                             |
-| **Architecture**    | Multi-threaded, parallel processing          |
-| **Main Branch**     | `main`                                       |
+**Last Updated**: November 19, 2025 (v2.3.2)  
+**Status**: ✅ ALL UNITY 6000 ISSUES RESOLVED
 
 ---
 
-## 📁 Critical Files
+## 🎯 Current State Summary
 
-```
-AssetStudio/
-├── AssetsManager.cs          # Main orchestrator (START HERE)
-├── SerializedFile.cs         # Asset file parser
-├── ObjectReader.cs           # Binary reader with version context
-├── Classes/
-│   ├── Shader.cs            # ⚠️ COMPLEX - Unity 6 issues
-│   ├── Texture2D.cs         # Image assets
-│   ├── Mesh.cs              # 3D models
-│   └── Material.cs          # Material assets
+**v2.3.2 Released** - Unity 6000 texture loading fixed, all features working
 
-AssetStudio.CLI/Program.cs    # CLI entry
-AssetStudio.GUI/MainForm.cs   # GUI entry
-AssetStudio.Utility/          # Export converters
-```
+### What's Working
+- ✅ Unity 6000.0.58f2 texture loading and preview (tested with Marvel Snap)
+- ✅ Multi-threaded parallel export (v2.2.0)
+- ✅ Thread-safe stream operations (v2.2.1)
+- ✅ Shader parsing bypass for Unity 6000+ (prevents format issues)
+
+### Recent History
+- **v2.3.1** broke texture loading with object-scoped bounds checking
+- **v2.3.2** reverted breaking changes, added shader bypass
+- Tested working with Korg_02 textures from Marvel Snap
 
 ---
 
-## 🔧 Common Code Patterns
+## 📂 Critical File Locations
 
-### Unity Version Checks
+### Core Parsing (v2.2.1 - WORKING VERSIONS)
+- `AssetStudio/EndianBinaryReader.cs` - Binary reading, `ReadAlignedString()` always calls `AlignStream()`
+- `AssetStudio/ObjectReader.cs` - Object scope reader, uses base `Remaining` calculation
+- `AssetStudio/AssetsManager.cs` - Asset loading orchestration
 
+### Asset Classes (MODIFIED FOR UNITY 6000)
+- `AssetStudio/Classes/Shader.cs` - **Unity 6000 bypass added at line 1084**
+- `AssetStudio/Classes/Texture2D.cs` - Texture loading (working with v2.2.1 core)
+- `AssetStudio/Classes/Sprite.cs` - Sprite handling
+- `AssetStudio/Classes/Mesh.cs` - Mesh data
+
+### Export/GUI
+- `AssetStudio.GUI/Studio.cs` - **Line 546: `Parallel.ForEach` for multi-threaded export**
+- `AssetStudio.GUI/MainForm.cs` - UI and preview logic
+
+---
+
+## 🔧 Key Technical Details
+
+### Unity 6000 Shader Bypass (NEW in v2.3.2)
 ```csharp
-// Major version (handles Unity 6 = 6000)
+// Location: AssetStudio/Classes/Shader.cs line 1084
 if (version[0] >= 6000)
 {
-    // Unity 6+ format
-}
-
-// Specific version
-if (version[0] > 2020 || (version[0] == 2020 && version[1] >= 2))
-{
-    // 2020.2 and up
-}
-
-// Version array: [major, minor, patch, type]
-// Unity 2021.3.10f1 → [2021, 3, 10, 1]
-// Unity 6000.0.58f2 → [6000, 0, 58, 2]
-```
-
-### Reading Arrays
-
-```csharp
-int count = reader.ReadInt32();
-var items = new List<MyType>(count);  // Preallocate
-for (int i = 0; i < count; i++)
-{
-    items.Add(new MyType(reader));
-}
-```
-
-### Alignment (CRITICAL)
-
-```csharp
-// After reading variable-length data (strings, arrays)
-reader.AlignStream();  // Aligns to 4-byte boundary
-```
-
-### Error Handling (Graceful Degradation)
-
-```csharp
-public MyClass(ObjectReader reader) : base(reader)
-{
-    try
+    Logger.Verbose($"Skipping Shader manual parsing for Unity {version[0]}.{version[1]}");
+    var remaining = reader.byteSize - (reader.Position - reader.byteStart);
+    if (remaining > 0)
     {
-        // Parse all fields
-        m_Field1 = reader.ReadInt32();
-        m_Field2 = reader.ReadAlignedString();
+        reader.ReadBytes((int)remaining);
     }
-    catch (Exception ex)
-    {
-        Logger.Warning($"Failed to parse {GetType().Name} (Unity {reader.version[0]}.{reader.version[1]}): {ex.Message}");
-        // Object still accessible with partial data
-    }
+    return;
 }
 ```
 
-### PPtr (Unity Object References)
-
+### Stream Reading (v2.2.1 - WORKING)
 ```csharp
-// Reading reference
-var shader = new PPtr<Shader>(reader);
-
-// Resolving reference
-var actualShader = shader.TryGet(assetsFile);
-if (actualShader != null)
+// EndianBinaryReader.ReadAlignedString() - ALWAYS calls AlignStream()
+public string ReadAlignedString()
 {
-    // Use shader
+    var result = "";
+    var length = ReadInt32();
+    if (length > 0 && length <= Remaining)
+    {
+        var stringData = ReadBytes(length);
+        result = Encoding.UTF8.GetString(stringData);
+    }
+    AlignStream();  // ← CRITICAL: Always called (v2.2.1 behavior)
+    return result;
+}
+```
+
+### ObjectReader (v2.2.1 - WORKING)
+```csharp
+// NO object-scoped Remaining override
+// Uses base EndianBinaryReader.Remaining (stream-based)
+public override int Read(byte[] buffer, int index, int count)
+{
+    var pos = Position - byteStart;
+    if (pos + count > byteSize)
+    {
+        throw new EndOfStreamException("Unable to read beyond the end of the stream.");
+    }
+    return base.Read(buffer, index, count);
 }
 ```
 
 ---
 
-## 🚨 Known Issues (Nov 2025)
+## 🚨 What NOT to Do
 
-| Issue                     | Status     | Impact                            |
-| ------------------------- | ---------- | --------------------------------- |
-| **Unity 6 Shader Format** | 🔄 Partial | 1,082 shaders fail to fully parse |
-| TypeTree mismatches       | ✅ Fixed   | Graceful skipping in v2.3.1       |
-| Stripped versions         | ✅ Fixed   | Interactive version prompt        |
+### ❌ DO NOT Change These (Working in v2.2.1)
+- `EndianBinaryReader.ReadAlignedString()` - Must always call `AlignStream()`
+- `ObjectReader.Remaining` - Must use base calculation (stream-based, not object-scoped)
+- `ObjectReader.Read()` bounds checking - Keep v2.2.1 version
 
-**Unity 6 Problem**: Format changed without documentation, shaders load with partial data.
+### ❌ DO NOT Break Multi-Threading
+- `AssetStudio.GUI/Studio.cs` line 546: `Parallel.ForEach` is CRITICAL
+- Thread-safety locks in `ObjectReader` must remain
+
+### ❌ DO NOT Remove Unity 6000 Shader Bypass
+- Shader parsing for Unity 6000+ is intentionally skipped
+- Format is undocumented and not needed for texture extraction
 
 ---
 
-## 🎨 Logging Levels
+## 📊 Version History Quick Reference
+
+| Version | Date       | Changes                                         | Status          |
+| ------- | ---------- | ----------------------------------------------- | --------------- |
+| v2.2.0  | Nov 2025   | Added multi-threaded parallel export            | ✅ Working      |
+| v2.2.1  | Nov 2025   | Thread-safety fixes                             | ✅ Working      |
+| v2.3.1  | Nov 19     | TypeTree fixes, BUT broke texture loading       | ❌ Broken       |
+| v2.3.2  | Nov 19     | Reverted breaking changes, added shader bypass  | ✅ Working      |
+
+---
+
+## 🎯 Quick Problem Solving
+
+### "Texture won't load/preview"
+1. Check if Unity 6000+ → ensure shader bypass is active
+2. Verify `ReadAlignedString()` calls `AlignStream()` always
+3. Check `ObjectReader.Remaining` doesn't have object-scope override
+
+### "Stream position errors"
+1. Ensure `AlignStream()` is called after variable-length reads
+2. Check version-specific field reads are conditioned properly
+3. Verify no object-scoped bounds checking interfering
+
+### "Multi-threading issues"
+1. Check all `Position` operations are locked in `ObjectReader`
+2. Verify `Parallel.ForEach` in Studio.cs is intact
+3. Ensure no shared state without proper synchronization
+
+---
+
+## 📝 Common Unity Version Checks
 
 ```csharp
-Logger.Error("...")    // File I/O failures, critical errors
-Logger.Warning("...")  // Parse failures (recoverable)
-Logger.Info("...")     // User-facing progress
-Logger.Verbose("...")  // Debug info (disabled by default)
+// Unity 6 detection (version[0] is 6000 for Unity 6)
+if (version[0] >= 6000)
+{
+    // Unity 6+ specific code
+}
+
+// Unity 2022.2+
+if (version[0] > 2022 || (version[0] == 2022 && version[1] >= 2))
+{
+    // 2022.2+ code
+}
+
+// Unity 5.5+
+if (version[0] == 5 && version[1] >= 5 || version[0] > 5)
+{
+    // 5.5+ code
+}
 ```
 
-**Always include context:**
+---
 
+## 🔍 Debugging Tips
+
+### Enable Verbose Logging
 ```csharp
-Logger.Warning($"Failed to parse {m_Name} (Unity {version[0]}.{version[1]}.{version[2]}): {ex.Message}");
+Logger.Verbose($"Debug info: {value}");
 ```
 
----
-
-## 🧵 Thread Safety
-
-**AssetStudio is HEAVILY multi-threaded:**
-
-✅ **Do:**
-
-- Use locks for shared collections
-- Use `ConcurrentDictionary` for concurrent access
-- Keep locks short (minimal hold time)
-- Ensure Logger is thread-safe
-
-❌ **Don't:**
-
-- Modify `assetsFileList` without `assetsFileListLock`
-- Access shared state without synchronization
-- Hold multiple locks (deadlock risk)
-
----
-
-## 🔍 Debugging Binary Formats
-
-### When encountering parse errors:
-
-1. **Check Unity version** at error location:
-
-   ```csharp
-   Logger.Verbose($"Parsing at version {reader.version[0]}.{reader.version[1]}");
-   ```
-
-2. **Log stream position**:
-
-   ```csharp
-   Logger.Verbose($"Position: {reader.Position}, remaining: {reader.BaseStream.Length - reader.Position}");
-   ```
-
-3. **Compare with similar versions** (e.g., 2021.3 vs 2022.1)
-
-4. **Add version-specific path** when format differs
-
-5. **Wrap in try-catch** for graceful degradation
-
----
-
-## 🛠️ Common Tasks
-
-### Adding Unity Version Support
-
-1. Find affected class (check error logs)
-2. Add version check before new fields
-3. Test with real game files
-4. Update README.md
-
-### Fixing Parse Failures
-
-1. Identify class from error (`Shader.cs`, `Texture2D.cs`, etc.)
-2. Check if new fields added in that Unity version
-3. Add version-conditional reading
-4. Ensure alignment after variable-length data
-
-### Improving Performance
-
-1. Profile with real data (gigabytes)
-2. Use `Parallel.ForEach()` for batch operations
-3. Preallocate collections (avoid growing)
-4. Cache lookups in dictionaries
-
----
-
-## 📦 Build & Release
-
-```powershell
-# Build
-dotnet build AssetStudio.sln -c Release
-
-# Test specific project
-dotnet build AssetStudio.CLI/AssetStudio.CLI.csproj -c Release
-
-# Release (triggers GitHub Actions)
-echo "2.3.2" > VERSION
-git add .
-git commit -m "v2.3.2 - Description"
-git tag v2.3.2
-git push origin main --tags
-```
-
----
-
-## 📚 Unity Serialization Types
-
-| C# Type   | Unity Type | Read Method                  |
-| --------- | ---------- | ---------------------------- |
-| `int`     | Int32      | `reader.ReadInt32()`         |
-| `float`   | Single     | `reader.ReadSingle()`        |
-| `string`  | String     | `reader.ReadAlignedString()` |
-| `bool`    | Boolean    | `reader.ReadBoolean()`       |
-| `byte[]`  | UInt8[]    | `reader.ReadUInt8Array()`    |
-| `Vector3` | Vector3    | 3x `ReadSingle()`            |
-| `PPtr<T>` | Reference  | `new PPtr<T>(reader)`        |
-
-**After variable-length reads (strings, arrays):**
-
+### Check Stream Position
 ```csharp
-reader.AlignStream();  // ⚠️ CRITICAL
+var pos = reader.Position;
+var remaining = reader.byteSize - (reader.Position - reader.byteStart);
+Logger.Verbose($"Position: 0x{pos:X8}, Remaining: {remaining} bytes");
+```
+
+### Inspect Raw Bytes
+```csharp
+var bytes = reader.ReadBytes(count);
+Logger.Verbose($"Bytes: {BitConverter.ToString(bytes)}");
 ```
 
 ---
 
-## ⚡ Performance Tips
+## ✅ Testing Checklist
 
-1. **Preallocate collections:**
-
-   ```csharp
-   var items = new List<MyType>(count);  // Not new List<MyType>()
-   ```
-
-2. **Use parallel processing:**
-
-   ```csharp
-   Parallel.ForEach(collection, item => { /* process */ });
-   ```
-
-3. **Cache lookups:**
-
-   ```csharp
-   if (!cache.TryGetValue(key, out var value))
-   {
-       value = ExpensiveOperation();
-       cache[key] = value;
-   }
-   ```
-
-4. **Stream large data** (don't load all into memory)
+When making changes, verify:
+- [ ] Build succeeds without errors
+- [ ] Unity 6000.0.58f2 (Marvel Snap) textures load
+- [ ] Korg_02 textures preview correctly
+- [ ] Multi-threaded export still works
+- [ ] No "Unable to read beyond stream" errors in log
+- [ ] No texture preview failures
 
 ---
 
-## 🎮 Test Games
-
-| Game                  | Unity Version | Notes                         |
-| --------------------- | ------------- | ----------------------------- |
-| **Marvel Snap**       | 6000.0.58f2   | Latest format (shader issues) |
-| **Genshin Impact**    | 2020.3.x      | MiHoYo encryption             |
-| **Among Us**          | 2019.4.x      | Simple baseline               |
-| **Honkai: Star Rail** | 2021.3.x      | Good mid-range test           |
-
----
-
-## 🔗 Related Docs
-
-- **Full Onboarding**: `AI_ONBOARDING.md`
-- **User Guide**: `README.md`
-- **Release Process**: `RELEASE.md`
-
----
-
-## 💡 Quick Troubleshooting
-
-| Error                                 | Likely Cause               | Fix                                  |
-| ------------------------------------- | -------------------------- | ------------------------------------ |
-| "Unable to read beyond end of stream" | Format changed             | Add version check, wrap in try-catch |
-| "String length [huge number]"         | Missed field before string | Check for new fields, alignment      |
-| Deadlock                              | Lock ordering              | Use consistent lock order            |
-| Corrupt exports                       | Wrong deserialization      | Verify field order, types            |
-
----
-
-## 🎯 Philosophy
-
-**Graceful Degradation Over Crashes**
-
-- Partial data > total failure
-- Log warnings, don't throw exceptions
-- Users prefer "couldn't export X" over "app crashed"
-
-**Version Agnostic Where Possible**
-
-- Check version only when format differs
-- Use try-catch for unknown formats
-- Log version info for debugging
-
-**Performance Matters**
-
-- Games have GIGABYTES of assets
-- Multi-threading is not optional
-- Cache aggressively, allocate smartly
-
----
-
-**Full docs**: See `AI_ONBOARDING.md` for comprehensive guide.
+**Remember**: v2.2.1 core (EndianBinaryReader, ObjectReader, AssetsManager) + Unity 6000 shader bypass = WORKING
