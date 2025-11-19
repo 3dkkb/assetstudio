@@ -14,9 +14,12 @@ namespace AssetStudio
         public SerializedType serializedType;
         public BuildTarget platform;
         public SerializedFileFormatVersion m_Version;
+        private readonly object positionLock = new object();
 
         public int[] version => assetsFile.version;
         public BuildType buildType => assetsFile.buildType;
+
+        public new long Remaining => (byteStart + byteSize) - Position;
 
         public ObjectReader(EndianBinaryReader reader, SerializedFile assetsFile, ObjectInfo objectInfo, Game game) : base(reader.BaseStream, reader.Endian)
         {
@@ -42,18 +45,24 @@ namespace AssetStudio
 
         public override int Read(byte[] buffer, int index, int count)
         {
-            var pos = Position - byteStart;
-            if (pos + count > byteSize)
+            lock (positionLock)
             {
-                throw new EndOfStreamException("Unable to read beyond the end of the stream.");
+                var pos = Position - byteStart;
+                if (pos + count > byteSize)
+                {
+                    throw new EndOfStreamException("Unable to read beyond the end of the stream.");
+                }
+                return base.Read(buffer, index, count);
             }
-            return base.Read(buffer, index, count);
         }
 
         public void Reset()
         {
             Logger.Verbose($"Resetting reader position to object offset 0x{byteStart:X8}...");
-            Position = byteStart;
+            lock (positionLock)
+            {
+                Position = byteStart;
+            }
         }
 
         public Vector3 ReadVector3()

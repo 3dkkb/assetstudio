@@ -100,8 +100,11 @@ namespace AssetStudio
         public byte[] GetRawData()
         {
             Logger.Verbose($"Dumping raw bytes of the object with {m_PathID} in file {assetsFile.fileName}...");
-            reader.Reset();
-            return reader.ReadBytes((int)byteSize);
+            lock (readerLock)
+            {
+                reader.Reset();
+                return reader.ReadBytes((int)byteSize);
+            }
         }
     }
 }

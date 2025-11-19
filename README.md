@@ -1,8 +1,8 @@
-# Unity Extractor Utility Asset Studio (updated)
+# Unity Extractor Utility Asset Studio (multi-threaded)
 
-**Version 2.2.0**
+**Version 2.3.0**
 
-A Unity asset extraction tool supporting Unity 2.x through Unity 6 with multi-threaded export capabilities.
+A Unity asset extraction tool supporting Unity 2.x through Unity 6 with multi-threaded loading and export capabilities.
 
 ## Download
 
@@ -27,6 +27,7 @@ Note: Requires Internet connection to fetch asset_index jsons.
 
 ### Performance
 
+- **Parallel Bundle Loading**: Multi-threaded bundle decompression significantly reduces load times for games with many asset bundles (2-8x faster on multi-core systems)
 - **Parallel Asset Export**: Multi-threaded export engine utilizing all CPU cores for 2-8x faster export speeds
 - Optimized for batch processing large asset collections
 - Thread-safe file operations prevent data corruption

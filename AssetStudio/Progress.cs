@@ -6,13 +6,17 @@ namespace AssetStudio
         public static bool Silent = false;
         public static IProgress<int> Default = new Progress<int>();
         private static int preValue;
+        private static readonly object lockObject = new object();
 
         public static void Reset()
         {
             if (!Silent)
             {
-                preValue = 0;
-                Default.Report(0);
+                lock (lockObject)
+                {
+                    preValue = 0;
+                    Default.Report(0);
+                }
             }
         }
 
@@ -27,10 +31,13 @@ namespace AssetStudio
 
         private static void Report(int value)
         {
-            if (value > preValue)
+            lock (lockObject)
             {
-                preValue = value;
-                Default.Report(value);
+                if (value > preValue)
+                {
+                    preValue = value;
+                    Default.Report(value);
+                }
             }
         }
     }

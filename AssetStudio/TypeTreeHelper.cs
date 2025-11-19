@@ -172,7 +172,17 @@ namespace AssetStudio
             {
                 var m_Node = m_Nodes[i];
                 var varNameStr = m_Node.m_Name;
-                obj[varNameStr] = ReadValue(m_Nodes, reader, ref i);
+                try
+                {
+                    obj[varNameStr] = ReadValue(m_Nodes, reader, ref i);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning($"Error reading field '{varNameStr}': {ex.Message}");
+                    // Store null for failed fields and continue
+                    obj[varNameStr] = null;
+                    break; // Stop processing further fields as we're out of sync
+                }
             }
             var readed = reader.Position - reader.byteStart;
             if (readed != reader.byteSize)
