@@ -34,16 +34,17 @@ namespace AssetStudio
             var seedPart4 = (uint)(encryptedInts[4] ^ 0x6F2A7347 ^ encryptedInts[7] ^ 0x4736C714);
 
             var seedInts = new uint[] { seedPart0, seedPart1, seedPart2, seedPart3, seedPart4 };
-            var seedBytes = MemoryMarshal.AsBytes<uint>(seedInts);
+            var seedBytesReadOnly = MemoryMarshal.AsBytes<uint>(seedInts);
+            var seedBytes = seedBytesReadOnly.ToArray();
 
             var seed = GenerateSeed(seedBytes);
             var seedBuffer = BitConverter.GetBytes(seed);
             seed = CRC.CalculateDigest(seedBuffer, 0, (uint)seedBuffer.Length);
 
             var key = seedInts[0] ^ seedInts[1] ^ seedInts[2] ^ seedInts[3] ^ seedInts[4] ^ (uint)encryptedSize;
-            
+
             RC4(seedBytes, key);
-            var keySeed = CRC.CalculateDigest(seedBytes.ToArray(), 0, (uint)seedBytes.Length);
+            var keySeed = CRC.CalculateDigest(seedBytes, 0, (uint)seedBytes.Length);
             var keySeedBytes = BitConverter.GetBytes(keySeed);
             keySeed = GenerateSeed(keySeedBytes);
 

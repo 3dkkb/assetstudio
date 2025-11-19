@@ -169,7 +169,7 @@ namespace AssetStudio.CLI
             UnityVersion = new Option<string>("--unity_version", "Specify Unity version.");
             GroupAssetsType = new Option<AssetGroupOption>("--group_assets", "Specify how exported assets should be grouped.");
             AssetExportType = new Option<ExportType>("--export_type", "Specify how assets should be exported.");
-            ImageFormat = new Option<ImageFormat>("--image_format", "Specify texture export format (Png, Jpeg, Bmp, Webp).");
+            ImageFormat = new Option<ImageFormat>("--image_format", "Specify texture export format for Texture2D and Sprite assets (Png, Jpeg, Bmp, Webp).");
             AIFile = new Option<FileInfo>("--ai_file", "Specify asset_index json file path (to recover GI containers).").LegalFilePathsOnly();
             DummyDllFolder = new Option<DirectoryInfo>("--dummy_dlls", "Specify DummyDll path.").LegalFilePathsOnly();
             Input = new Argument<FileInfo>("input_path", "Input file/folder.").LegalFilePathsOnly();

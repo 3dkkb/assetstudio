@@ -581,7 +581,7 @@ namespace AssetStudio
                     }
                     var m_KeepVertices = reader.ReadBoolean();
                     var m_KeepIndices = reader.ReadBoolean();
-                    if (reader.Game.Type.IsBH3() && HasVertexColorSkinning(reader.serializedType)) 
+                    if (reader.Game.Type.IsBH3() && HasVertexColorSkinning(reader.serializedType))
                     {
                         var m_VertexColorSkinning = reader.ReadBoolean();
                     }
@@ -838,7 +838,7 @@ namespace AssetStudio
                             {
                                 var buff = new byte[componentByteSize];
                                 Buffer.BlockCopy(componentBytes, i * componentByteSize, buff, 0, componentByteSize);
-                                buff = buff.Reverse().ToArray();
+                                Array.Reverse(buff);
                                 Buffer.BlockCopy(buff, 0, componentBytes, i * componentByteSize, componentByteSize);
                             }
                         }
