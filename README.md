@@ -1,11 +1,12 @@
 # Unity Extractor Utility Asset Studio (multi-threaded)
 
-**Version 2.3.2**
+**Version 2.4.0**
 
 A Unity asset extraction tool supporting Unity 2.x through Unity 6 with multi-threaded loading and export capabilities.
 
 **Latest improvements:**
 
+- ✅ Fixed parallel loading with duplicate CAB files (v2.4.0)
 - ✅ Fixed Unity 6000 texture loading (v2.3.2)
 - ✅ Multi-threaded parallel export for faster processing (v2.2.0)
 - ✅ Thread-safety improvements (v2.2.1)

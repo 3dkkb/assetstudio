@@ -1,49 +1,41 @@
 # AssetStudio - Current State & Context (November 2025)
 
-**Last Updated**: November 19, 2025 (v2.3.2 - Texture Loading Fix)  
+**Last Updated**: November 27, 2025 (v2.4.0 - Parallel Loading Fix)  
 **For**: AI assistants joining active development  
 **Purpose**: Understand what's happening RIGHT NOW
 
 ---
 
-## 🎯 Current Status: Unity 6000 Support FULLY WORKING ✅
+## 🎯 Current Status: Parallel Loading FULLY WORKING ✅
 
-**v2.3.2 RELEASED**: All Unity 6000 issues resolved - textures load and preview correctly
+**v2.4.0 RELEASED**: Fixed parallel loading issues with duplicate CAB files
 
 ### Timeline of Fixes
 
-#### v2.3.0 (Nov 15, 2025)
+#### v2.4.0 (Nov 27, 2025) - **PARALLEL LOADING FIXED** ✅
 
-- ✅ Added Unity 6 (6000.x) version support
-- ✅ Upgraded to .NET 10
-- ✅ Updated Texture2D format for Unity 2023.2+
+- ✅ **Fixed duplicate CAB file handling**:
+  - Skip loading standalone CAB files from `_unpacked` folders (cached bundle extracts)
+  - Add `IsFromBundle` flag to prefer bundle versions over standalone CABs
+  - Bundle versions have correct TypeTree structure, standalone copies may be incomplete
+- ✅ **Root cause identified**: Standalone CAB files have different TypeTree than bundle versions
+- ✅ **Tested with Marvel Snap (Unity 6000.0.58f2)**:
+  - 0 Texture2D loading failures (was 4,400+ before fix)
+  - All textures load and preview correctly in parallel mode
 
-#### v2.3.1 (Nov 19, 2025) - BROKE TEXTURE LOADING ⚠️
+#### v2.3.3 (Nov 20, 2025)
 
-- ✅ Added TypeTree deserialization error handling
-- ❌ Changed `ObjectReader.Remaining` to object-scoped bounds checking
-- ❌ Changed `ReadAlignedString()` to skip alignment on errors
-- **Result**: Broke texture loading for Unity 6000 (Korg_02 textures failed)
-
-#### v2.3.2 (Nov 19, 2025) - **ALL FIXED** ✅
-
-- ✅ **Reverted v2.3.1's breaking changes**:
-  - Restored `EndianBinaryReader.ReadAlignedString()` to always call `AlignStream()`
-  - Removed object-scoped `ObjectReader.Remaining` override
-  - Restored `AssetsManager.cs` to v2.2.1 state
-- ✅ **Added Unity 6000 shader parsing bypass**:
-  - Skips manual shader parsing for Unity 6000+ (not needed for texture extraction)
-  - Prevents shader format issues from breaking texture loading
-- ✅ **Maintained all improvements**:
-  - Multi-threaded parallel export (v2.2.0)
-  - Thread-safety fixes (v2.2.1)
-  - TypeTree improvements that don't break textures
-- ✅ **Tested with Unity 6000.0.58f2 (Marvel Snap)**:
-  - Korg_02 textures load and preview correctly
-  - No texture loading errors
-  - All features working
+- ✅ Improved Unity version detection for stripped builds
+- ✅ Enhanced version detection from .bundle files
 
 ### What Works Now
+
+**Parallel Loading:**
+
+- ✅ Duplicate CAB file handling (prefers bundle versions)
+- ✅ Skip `_unpacked` folder standalone CABs
+- ✅ Thread-safe file list management
+- ✅ 0 Texture2D loading failures
 
 **Unity 6000 Support:**
 
@@ -53,13 +45,14 @@
 - ✅ GameObject hierarchy
 - ✅ Animation clips
 - ⚠️ Shader parsing bypassed (not needed for asset extraction)
+- ⚠️ SkinnedMeshRenderer has some parsing issues (191 failures, unrelated to CAB fix)
 
 **Performance:**
 
+- ✅ Multi-threaded parallel loading
 - ✅ Multi-threaded parallel export
 - ✅ Thread-safe stream operations
 - ✅ Fast asset loading
-- ✅ Research source: AXiX-official/Studio fork analysis
 
 ### Current Status
 
