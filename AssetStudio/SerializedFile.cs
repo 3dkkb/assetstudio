@@ -34,6 +34,19 @@ namespace AssetStudio
         public List<SerializedType> m_RefTypes;
         public string userInformation;
 
+        /// <summary>
+        /// Indicates if this file was originally loaded without version info (stripped).
+        /// This is set once during initial load and won't change even if SetVersion is called later.
+        /// Used to determine if the file's object info may be incorrect (from a stripped standalone CAB).
+        /// </summary>
+        public bool WasOriginallyStripped { get; private set; } = false;
+
+        /// <summary>
+        /// Indicates if this file was loaded from a bundle/archive (MemoryStream) rather than directly from disk (FileStream).
+        /// Files from bundles typically have correct object data, while standalone CAB files may be stripped/incomplete.
+        /// </summary>
+        public bool IsFromBundle { get; set; } = false;
+
         public SerializedFile(FileReader reader, AssetsManager assetsManager)
         {
             this.assetsManager = assetsManager;
@@ -82,6 +95,8 @@ namespace AssetStudio
             {
                 unityVersion = reader.ReadStringToNull();
                 Logger.Verbose($"Unity version {unityVersion}");
+                // Track if the file was originally stripped
+                WasOriginallyStripped = (unityVersion == strippedVersion);
                 SetVersion(unityVersion);
             }
             if (header.m_Version >= SerializedFileFormatVersion.Unknown_8)

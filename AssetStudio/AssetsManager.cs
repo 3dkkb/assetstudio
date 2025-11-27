@@ -1,11 +1,13 @@
 using System;
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using static AssetStudio.ImportHelper;
 
 namespace AssetStudio
@@ -30,13 +32,18 @@ namespace AssetStudio
         public CancellationTokenSource tokenSource = new CancellationTokenSource();
         public List<SerializedFile> assetsFileList = new List<SerializedFile>();
 
+        // Thread-safe collections for parallel file loading
+        private readonly object assetsFileListLock = new object();
+        private readonly object importFilesLock = new object();
+        private readonly object versionDetectionLock = new object();
+
         internal Dictionary<string, int> assetsFileIndexCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        internal Dictionary<string, BinaryReader> resourceFileReaders = new Dictionary<string, BinaryReader>(StringComparer.OrdinalIgnoreCase);
+        internal ConcurrentDictionary<string, BinaryReader> resourceFileReaders = new ConcurrentDictionary<string, BinaryReader>(StringComparer.OrdinalIgnoreCase);
 
         internal List<string> importFiles = new List<string>();
-        internal HashSet<string> importFilesHash = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        internal HashSet<string> noexistFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        internal HashSet<string> assetsFileListHash = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        internal ConcurrentDictionary<string, byte> importFilesHash = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+        internal ConcurrentDictionary<string, byte> noexistFiles = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+        internal ConcurrentDictionary<string, byte> assetsFileListHash = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
 
         public void LoadFiles(params string[] files)
         {
@@ -92,20 +99,62 @@ namespace AssetStudio
             {
                 Logger.Verbose($"caching {file} path and name to filter out duplicates");
                 importFiles.Add(file);
-                importFilesHash.Add(Path.GetFileName(file));
+                importFilesHash.TryAdd(Path.GetFileName(file), 0);
             }
 
             Progress.Reset();
-            //use a for loop because list size can change
-            for (var i = 0; i < importFiles.Count; i++)
+
+            // Parallel file loading with dynamic dependency handling
+            // Files are processed in waves: load current batch in parallel, 
+            // then process any new dependencies that were discovered
+            int processedCount = 0;
+            int totalProgress = 0;
+
+            while (processedCount < importFiles.Count)
             {
-                LoadFile(importFiles[i]);
-                Progress.Report(i + 1, importFiles.Count);
                 if (tokenSource.IsCancellationRequested)
                 {
                     Logger.Info("Loading files has been aborted !!");
                     break;
                 }
+
+                // Get current batch of files to process
+                int currentBatchEnd;
+                lock (importFilesLock)
+                {
+                    currentBatchEnd = importFiles.Count;
+                }
+
+                // Process this batch in parallel
+                var options = new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = Environment.ProcessorCount,
+                    CancellationToken = tokenSource.Token
+                };
+
+                try
+                {
+                    Parallel.For(processedCount, currentBatchEnd, options, i =>
+                    {
+                        string fileToLoad;
+                        lock (importFilesLock)
+                        {
+                            fileToLoad = importFiles[i];
+                        }
+                        LoadFile(fileToLoad);
+
+                        int progress = Interlocked.Increment(ref totalProgress);
+                        // Use approximate count since it may grow
+                        Progress.Report(progress, Math.Max(progress, importFiles.Count));
+                    });
+                }
+                catch (OperationCanceledException)
+                {
+                    Logger.Info("Loading files has been aborted !!");
+                    break;
+                }
+
+                processedCount = currentBatchEnd;
             }
 
             importFiles.Clear();
@@ -164,6 +213,19 @@ namespace AssetStudio
                 foreach (var bundleFile in bundleFiles.Take(3)) // Check first 3 bundles
                 {
                     Logger.Verbose($"Checking bundle {bundleFile} for Unity version");
+                    detectedFolderVersion = TryExtractVersionFromBundle(bundleFile);
+                    if (!string.IsNullOrEmpty(detectedFolderVersion))
+                    {
+                        Logger.Info($"Detected Unity version from {Path.GetFileName(bundleFile)}: {detectedFolderVersion}");
+                        return;
+                    }
+                }
+
+                // Try .bundle files (common in Addressables/modern Unity games)
+                var dotBundleFiles = Directory.GetFiles(path, "*.bundle", SearchOption.AllDirectories);
+                foreach (var bundleFile in dotBundleFiles.Take(5)) // Check first 5 bundles
+                {
+                    Logger.Verbose($"Checking .bundle file {bundleFile} for Unity version");
                     detectedFolderVersion = TryExtractVersionFromBundle(bundleFile);
                     if (!string.IsNullOrEmpty(detectedFolderVersion))
                     {
@@ -267,58 +329,100 @@ namespace AssetStudio
 
         private void LoadAssetsFile(FileReader reader)
         {
-            if (!assetsFileListHash.Contains(reader.FileName))
+            // Skip loading standalone CAB files from _unpacked folders
+            // These are cached extracts from bundles with stripped/incompatible structure
+            // The bundle version will be loaded anyway and has the correct structure
+            if (reader.FullPath.Contains("_unpacked") && reader.FileName.StartsWith("CAB-"))
             {
-                Logger.Info($"Loading {reader.FullPath}");
-                try
+                Logger.Verbose($"Skipping unpacked CAB file {reader.FullPath} (will load from bundle instead)");
+                reader.Dispose();
+                return;
+            }
+
+            Logger.Info($"Loading {reader.FullPath}");
+            try
+            {
+                var assetsFile = new SerializedFile(reader, this);
+                CheckStrippedVersion(assetsFile);
+
+                lock (assetsFileListLock)
                 {
-                    var assetsFile = new SerializedFile(reader, this);
-                    CheckStrippedVersion(assetsFile);
-                    assetsFileList.Add(assetsFile);
-                    assetsFileListHash.Add(assetsFile.fileName);
-
-                    foreach (var sharedFile in assetsFile.m_Externals)
+                    // Check if this file already exists in the list
+                    var existingIndex = assetsFileList.FindIndex(f => f.fileName.Equals(reader.FileName, StringComparison.OrdinalIgnoreCase));
+                    if (existingIndex >= 0)
                     {
-                        Logger.Verbose($"{assetsFile.fileName} needs external file {sharedFile.fileName}, attempting to look it up...");
-                        var sharedFileName = sharedFile.fileName;
-
-                        if (!importFilesHash.Contains(sharedFileName))
+                        var existing = assetsFileList[existingIndex];
+                        // Replace standalone version with bundle version
+                        // Bundle versions have correct object data while standalone CAB files may be stripped/incomplete
+                        if (existing.IsFromBundle && !assetsFile.IsFromBundle)
                         {
-                            var sharedFilePath = Path.Combine(Path.GetDirectoryName(reader.FullPath), sharedFileName);
-                            if (!noexistFiles.Contains(sharedFilePath))
+                            // New file is standalone, existing is from bundle - keep bundle version
+                            Logger.Info($"Skipping standalone version of {reader.FileName} (already have bundle version)");
+                            reader.Dispose();
+                            return;
+                        }
+                        else if (!existing.IsFromBundle && assetsFile.IsFromBundle)
+                        {
+                            // New file is from bundle, existing is standalone - replace with bundle
+                            Logger.Info($"Replacing standalone version of {reader.FileName} with bundle version");
+                            assetsFileList[existingIndex] = assetsFile;
+                            existing.reader?.Dispose();
+                        }
+                        else
+                        {
+                            // Both from same source type - keep existing
+                            Logger.Info($"Skipping {reader.FullPath} (already have {(existing.IsFromBundle ? "bundle" : "standalone")} version)");
+                            reader.Dispose();
+                            return; // Don't process externals for skipped file
+                        }
+                    }
+                    else
+                    {
+                        // First time seeing this file - add to list
+                        assetsFileListHash.TryAdd(reader.FileName, 0);
+                        assetsFileList.Add(assetsFile);
+                    }
+                }
+
+                foreach (var sharedFile in assetsFile.m_Externals)
+                {
+                    Logger.Verbose($"{assetsFile.fileName} needs external file {sharedFile.fileName}, attempting to look it up...");
+                    var sharedFileName = sharedFile.fileName;
+
+                    // Thread-safe check - TryAdd returns false if key already exists
+                    if (importFilesHash.TryAdd(sharedFileName, 0))
+                    {
+                        var sharedFilePath = Path.Combine(Path.GetDirectoryName(reader.FullPath), sharedFileName);
+                        if (!noexistFiles.ContainsKey(sharedFilePath))
+                        {
+                            if (!File.Exists(sharedFilePath))
                             {
-                                if (!File.Exists(sharedFilePath))
+                                var findFiles = Directory.GetFiles(Path.GetDirectoryName(reader.FullPath), sharedFileName, SearchOption.AllDirectories);
+                                if (findFiles.Length > 0)
                                 {
-                                    var findFiles = Directory.GetFiles(Path.GetDirectoryName(reader.FullPath), sharedFileName, SearchOption.AllDirectories);
-                                    if (findFiles.Length > 0)
-                                    {
-                                        Logger.Verbose($"Found {findFiles.Length} matching files, picking first file {findFiles[0]} !!");
-                                        sharedFilePath = findFiles[0];
-                                    }
+                                    Logger.Verbose($"Found {findFiles.Length} matching files, picking first file {findFiles[0]} !!");
+                                    sharedFilePath = findFiles[0];
                                 }
-                                if (File.Exists(sharedFilePath))
+                            }
+                            if (File.Exists(sharedFilePath))
+                            {
+                                lock (importFilesLock)
                                 {
                                     importFiles.Add(sharedFilePath);
-                                    importFilesHash.Add(sharedFileName);
                                 }
-                                else
-                                {
-                                    Logger.Verbose("Nothing was found, caching into non existant files to avoid repeated searching !!");
-                                    noexistFiles.Add(sharedFilePath);
-                                }
+                            }
+                            else
+                            {
+                                Logger.Verbose("Nothing was found, caching into non existant files to avoid repeated searching !!");
+                                noexistFiles.TryAdd(sharedFilePath, 0);
                             }
                         }
                     }
                 }
-                catch (Exception e)
-                {
-                    Logger.Error($"Error while reading assets file {reader.FullPath}", e);
-                    reader.Dispose();
-                }
             }
-            else
+            catch (Exception e)
             {
-                Logger.Info($"Skipping {reader.FullPath}");
+                Logger.Error($"Error while reading assets file {reader.FullPath}", e);
                 reader.Dispose();
             }
         }
@@ -326,29 +430,56 @@ namespace AssetStudio
         private void LoadAssetsFromMemory(FileReader reader, string originalPath, string unityVersion = null, long originalOffset = 0)
         {
             Logger.Verbose($"Loading asset file {reader.FileName} with version {unityVersion} from {originalPath} at offset 0x{originalOffset:X8}");
-            if (!assetsFileListHash.Contains(reader.FileName))
+
+            try
             {
-                try
+                var assetsFile = new SerializedFile(reader, this);
+                assetsFile.originalPath = originalPath;
+                assetsFile.offset = originalOffset;
+                assetsFile.IsFromBundle = true; // Mark as loaded from bundle/archive
+                if (!string.IsNullOrEmpty(unityVersion) && assetsFile.header.m_Version < SerializedFileFormatVersion.Unknown_7)
                 {
-                    var assetsFile = new SerializedFile(reader, this);
-                    assetsFile.originalPath = originalPath;
-                    assetsFile.offset = originalOffset;
-                    if (!string.IsNullOrEmpty(unityVersion) && assetsFile.header.m_Version < SerializedFileFormatVersion.Unknown_7)
-                    {
-                        assetsFile.SetVersion(unityVersion);
-                    }
-                    CheckStrippedVersion(assetsFile);
-                    assetsFileList.Add(assetsFile);
-                    assetsFileListHash.Add(assetsFile.fileName);
+                    assetsFile.SetVersion(unityVersion);
                 }
-                catch (Exception e)
+                CheckStrippedVersion(assetsFile);
+
+                lock (assetsFileListLock)
                 {
-                    Logger.Error($"Error while reading assets file {reader.FullPath} from {Path.GetFileName(originalPath)}", e);
-                    resourceFileReaders.TryAdd(reader.FileName, reader);
+
+                    // Check if this file already exists in the list
+                    var existingIndex = assetsFileList.FindIndex(f => f.fileName.Equals(reader.FileName, StringComparison.OrdinalIgnoreCase));
+
+                    if (existingIndex >= 0)
+                    {
+                        var existing = assetsFileList[existingIndex];
+                        // Replace standalone version with bundle version
+                        // Bundle versions have correct object data while standalone CAB files may be stripped/incomplete
+                        if (!existing.IsFromBundle && assetsFile.IsFromBundle)
+                        {
+                            Logger.Info($"Replacing standalone version of {reader.FileName} with bundle version");
+                            assetsFileList[existingIndex] = assetsFile;
+                            existing.reader?.Dispose();
+                        }
+                        else
+                        {
+                            // Existing is from bundle or both from same source - keep existing
+                            Logger.Info($"Skipping {originalPath} ({reader.FileName}) - already have {(existing.IsFromBundle ? "bundle" : "standalone")} version");
+                            return; // Don't add duplicate
+                        }
+                    }
+                    else
+                    {
+                        // First time seeing this file
+                        assetsFileListHash.TryAdd(reader.FileName, 0);
+                        assetsFileList.Add(assetsFile);
+                    }
                 }
             }
-            else
-                Logger.Info($"Skipping {originalPath} ({reader.FileName})");
+            catch (Exception e)
+            {
+                Logger.Error($"Error while reading assets file {reader.FullPath} from {Path.GetFileName(originalPath)}", e);
+                resourceFileReaders.TryAdd(reader.FileName, reader);
+            }
         }
 
         private void LoadBundleFile(FileReader reader, string originalPath = null, long originalOffset = 0, bool log = true)
@@ -361,12 +492,17 @@ namespace AssetStudio
             {
                 var bundleFile = new BundleFile(reader, Game);
 
-                // Priority 2: Extract Unity version from bundle header if available
-                if (!string.IsNullOrEmpty(bundleFile.m_Header.unityRevision) &&
-                    string.IsNullOrEmpty(detectedFolderVersion))
+                // Priority 2: Extract Unity version from bundle header if available (thread-safe)
+                if (!string.IsNullOrEmpty(bundleFile.m_Header.unityRevision))
                 {
-                    detectedFolderVersion = bundleFile.m_Header.unityRevision;
-                    Logger.Info($"Detected Unity version from bundle: {detectedFolderVersion}");
+                    lock (versionDetectionLock)
+                    {
+                        if (string.IsNullOrEmpty(detectedFolderVersion))
+                        {
+                            detectedFolderVersion = bundleFile.m_Header.unityRevision;
+                            Logger.Info($"Detected Unity version from bundle: {detectedFolderVersion}");
+                        }
+                    }
                 }
 
                 foreach (var file in bundleFile.fileList)
@@ -459,12 +595,12 @@ namespace AssetStudio
                             if (!splitFiles.Contains(basePath))
                             {
                                 splitFiles.Add(basePath);
-                                importFilesHash.Add(baseName);
+                                importFilesHash.TryAdd(baseName, 0);
                             }
                         }
                         else
                         {
-                            importFilesHash.Add(entry.Name);
+                            importFilesHash.TryAdd(entry.Name, 0);
                         }
                     }
 
@@ -695,15 +831,25 @@ namespace AssetStudio
             }
         }
 
+        // Lock for version prompting - ensures only one thread prompts user
+        private readonly object versionPromptLock = new object();
+        private bool versionPrompted = false;
+
         public void CheckStrippedVersion(SerializedFile assetsFile)
         {
             if (assetsFile.IsVersionStripped && string.IsNullOrEmpty(SpecifyUnityVersion))
             {
                 // Priority 1 & 3: Use detected folder version or DefaultVersion as fallback
-                if (!string.IsNullOrEmpty(detectedFolderVersion))
+                string version;
+                lock (versionDetectionLock)
                 {
-                    Logger.Info($"Using detected Unity version for {assetsFile.fileName}: {detectedFolderVersion}");
-                    assetsFile.SetVersion(detectedFolderVersion);
+                    version = detectedFolderVersion;
+                }
+
+                if (!string.IsNullOrEmpty(version))
+                {
+                    Logger.Info($"Using detected Unity version for {assetsFile.fileName}: {version}");
+                    assetsFile.SetVersion(version);
                     return;
                 }
                 else if (!string.IsNullOrEmpty(DefaultVersion))
@@ -713,19 +859,40 @@ namespace AssetStudio
                     return;
                 }
 
-                // Try to prompt user for version if event is subscribed
+                // Try to prompt user for version if event is subscribed (thread-safe)
                 if (OnVersionPrompt != null)
                 {
-                    var eventArgs = new VersionPromptEventArgs
+                    lock (versionPromptLock)
                     {
-                        FileName = assetsFile.fileName
-                    };
-                    OnVersionPrompt(this, eventArgs);
+                        // Check again if another thread already got the version
+                        if (!string.IsNullOrEmpty(SpecifyUnityVersion))
+                        {
+                            assetsFile.SetVersion(SpecifyUnityVersion);
+                            return;
+                        }
 
-                    if (!eventArgs.Cancelled && !string.IsNullOrEmpty(eventArgs.UserProvidedVersion))
-                    {
-                        assetsFile.SetVersion(eventArgs.UserProvidedVersion);
-                        return;
+                        // Only prompt once
+                        if (!versionPrompted)
+                        {
+                            versionPrompted = true;
+                            var eventArgs = new VersionPromptEventArgs
+                            {
+                                FileName = assetsFile.fileName
+                            };
+                            OnVersionPrompt(this, eventArgs);
+
+                            if (!eventArgs.Cancelled && !string.IsNullOrEmpty(eventArgs.UserProvidedVersion))
+                            {
+                                SpecifyUnityVersion = eventArgs.UserProvidedVersion;
+                                assetsFile.SetVersion(eventArgs.UserProvidedVersion);
+                                return;
+                            }
+                        }
+                        else if (!string.IsNullOrEmpty(SpecifyUnityVersion))
+                        {
+                            assetsFile.SetVersion(SpecifyUnityVersion);
+                            return;
+                        }
                     }
                 }
 
@@ -756,6 +923,10 @@ namespace AssetStudio
 
             assetsFileIndexCache.Clear();
 
+            // Reset parallel loading state
+            versionPrompted = false;
+            detectedFolderVersion = null;
+
             tokenSource.Dispose();
             tokenSource = new CancellationTokenSource();
 
@@ -780,6 +951,7 @@ namespace AssetStudio
                         return;
                     }
                     var objectReader = new ObjectReader(assetsFile.reader, assetsFile, objectInfo, Game);
+
                     try
                     {
                         Object obj = objectReader.type switch

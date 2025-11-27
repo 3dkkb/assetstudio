@@ -43,10 +43,12 @@ namespace AssetStudio
         public override int Read(byte[] buffer, int index, int count)
         {
             var pos = Position - byteStart;
+
             if (pos + count > byteSize)
             {
                 throw new EndOfStreamException("Unable to read beyond the end of the stream.");
             }
+
             return base.Read(buffer, index, count);
         }
 

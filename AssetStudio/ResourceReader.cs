@@ -10,7 +10,6 @@ namespace AssetStudio
         private long offset;
         private long size;
         private BinaryReader reader;
-        private readonly object readerLock = new object();
 
         public int Size { get => (int)size; }
 
@@ -67,9 +66,9 @@ namespace AssetStudio
 
         public byte[] GetData()
         {
-            lock (readerLock)
+            var binaryReader = GetReader();
+            lock (binaryReader)  // Lock on shared reader for thread safety
             {
-                var binaryReader = GetReader();
                 binaryReader.BaseStream.Position = offset;
                 return binaryReader.ReadBytes((int)size);
             }
@@ -77,9 +76,9 @@ namespace AssetStudio
 
         public void GetData(byte[] buff)
         {
-            lock (readerLock)
+            var binaryReader = GetReader();
+            lock (binaryReader)  // Lock on shared reader for thread safety
             {
-                var binaryReader = GetReader();
                 binaryReader.BaseStream.Position = offset;
                 binaryReader.Read(buff, 0, (int)size);
             }
@@ -87,9 +86,9 @@ namespace AssetStudio
 
         public void WriteData(string path)
         {
-            lock (readerLock)
+            var binaryReader = GetReader();
+            lock (binaryReader)  // Lock on shared reader for thread safety
             {
-                var binaryReader = GetReader();
                 binaryReader.BaseStream.Position = offset;
                 using (var writer = File.OpenWrite(path))
                 {

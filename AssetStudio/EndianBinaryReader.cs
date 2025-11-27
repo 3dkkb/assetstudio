@@ -30,84 +30,82 @@ namespace AssetStudio
 
         public override short ReadInt16()
         {
+            Read(buffer, 0, 2);
             if (Endian == EndianType.BigEndian)
             {
-                Read(buffer, 0, 2);
                 return BinaryPrimitives.ReadInt16BigEndian(buffer);
             }
-            return base.ReadInt16();
+            return BinaryPrimitives.ReadInt16LittleEndian(buffer);
         }
 
         public override int ReadInt32()
         {
+            Read(buffer, 0, 4);
             if (Endian == EndianType.BigEndian)
             {
-                Read(buffer, 0, 4);
                 return BinaryPrimitives.ReadInt32BigEndian(buffer);
             }
-            return base.ReadInt32();
+            return BinaryPrimitives.ReadInt32LittleEndian(buffer);
         }
 
         public override long ReadInt64()
         {
+            Read(buffer, 0, 8);
             if (Endian == EndianType.BigEndian)
             {
-                Read(buffer, 0, 8);
                 return BinaryPrimitives.ReadInt64BigEndian(buffer);
             }
-            return base.ReadInt64();
+            return BinaryPrimitives.ReadInt64LittleEndian(buffer);
         }
 
         public override ushort ReadUInt16()
         {
+            Read(buffer, 0, 2);
             if (Endian == EndianType.BigEndian)
             {
-                Read(buffer, 0, 2);
                 return BinaryPrimitives.ReadUInt16BigEndian(buffer);
             }
-            return base.ReadUInt16();
+            return BinaryPrimitives.ReadUInt16LittleEndian(buffer);
         }
 
         public override uint ReadUInt32()
         {
+            Read(buffer, 0, 4);
             if (Endian == EndianType.BigEndian)
             {
-                Read(buffer, 0, 4);
                 return BinaryPrimitives.ReadUInt32BigEndian(buffer);
             }
-            return base.ReadUInt32();
+            return BinaryPrimitives.ReadUInt32LittleEndian(buffer);
         }
 
         public override ulong ReadUInt64()
         {
+            Read(buffer, 0, 8);
             if (Endian == EndianType.BigEndian)
             {
-                Read(buffer, 0, 8);
                 return BinaryPrimitives.ReadUInt64BigEndian(buffer);
             }
-            return base.ReadUInt64();
+            return BinaryPrimitives.ReadUInt64LittleEndian(buffer);
         }
 
         public override float ReadSingle()
         {
+            Read(buffer, 0, 4);
             if (Endian == EndianType.BigEndian)
             {
-                Read(buffer, 0, 4);
-                Array.Reverse(buffer, 0, 4);
-                return BitConverter.ToSingle(buffer, 0);
+                return BinaryPrimitives.ReadSingleBigEndian(buffer);
             }
-            return base.ReadSingle();
+            return BinaryPrimitives.ReadSingleLittleEndian(buffer);
         }
 
         public override double ReadDouble()
         {
+            Read(buffer, 0, 8);
             if (Endian == EndianType.BigEndian)
             {
-                Read(buffer, 0, 8);
-                Array.Reverse(buffer);
-                return BitConverter.ToDouble(buffer, 0);
+                return BinaryPrimitives.ReadDoubleBigEndian(buffer);
             }
-            return base.ReadDouble();
+            return BinaryPrimitives.ReadDoubleLittleEndian(buffer);
         }
         public override byte[] ReadBytes(int count)
         {

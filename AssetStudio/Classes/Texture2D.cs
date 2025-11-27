@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 
 namespace AssetStudio
 {
@@ -70,12 +71,19 @@ namespace AssetStudio
 
         private static bool HasGNFTexture(SerializedType type) => type.Match("1D52BB98AA5F54C67C22C39E8B2E400F");
         private static bool HasExternalMipRelativeOffset(SerializedType type) => type.Match("1D52BB98AA5F54C67C22C39E8B2E400F", "5390A985F58D5524F95DB240E8789704");
+
+        // Check if TypeTree has a specific field name (for dynamic structure detection)
+        private static bool TypeTreeHasField(SerializedType type, string fieldName)
+        {
+            if (type?.m_Type?.m_Nodes == null) return true; // No TypeTree, assume field exists based on version
+            return type.m_Type.m_Nodes.Any(n => n.m_Name == fieldName);
+        }
+
         public Texture2D(ObjectReader reader) : base(reader)
         {
-            Logger.Verbose($"[Texture2D] Reading Texture2D for Unity {string.Join(".", version)} at position 0x{reader.Position:X}");
             m_Width = reader.ReadInt32();
             m_Height = reader.ReadInt32();
-            Logger.Verbose($"[Texture2D] Width={m_Width}, Height={m_Height}, Position=0x{reader.Position:X}");
+
             var m_CompleteImageSize = reader.ReadInt32();
             if (version[0] >= 2020) //2020.1 and up
             {
@@ -106,7 +114,9 @@ namespace AssetStudio
             {
                 var m_IgnoreMasterTextureLimit = reader.ReadBoolean();
             }
-            if (version[0] > 2022 || (version[0] == 2022 && version[1] >= 2)) //2022.2 and up (includes Unity 6)
+            // Check TypeTree first - if it exists and doesn't have this field, skip it
+            var hasMipmapLimitGroupName = TypeTreeHasField(reader.serializedType, "m_MipmapLimitGroupName");
+            if (hasMipmapLimitGroupName && (version[0] > 2022 || (version[0] == 2022 && version[1] >= 2))) //2022.2 and up (includes Unity 6)
             {
                 reader.AlignStream();
                 var m_MipmapLimitGroupName = reader.ReadAlignedString();
@@ -142,9 +152,24 @@ namespace AssetStudio
             {
                 var m_ColorSpace = reader.ReadInt32();
             }
-            if (version[0] > 2020 || (version[0] == 2020 && version[1] >= 2)) //2020.2 and up (includes Unity 6)
+            // Check TypeTree first - if it exists and doesn't have this field, skip it
+            var hasPlatformBlob = TypeTreeHasField(reader.serializedType, "m_PlatformBlob");
+            if (hasPlatformBlob && (version[0] > 2020 || (version[0] == 2020 && version[1] >= 2))) //2020.2 and up (includes Unity 6)
             {
-                var m_PlatformBlob = reader.ReadUInt8Array();
+                var blobLen = reader.ReadInt32();
+                byte[] m_PlatformBlob = null;
+                // Sanity check: blobLen should be reasonable (not negative, not larger than remaining object bytes)
+                var remainingBytes = reader.byteSize - (reader.Position - reader.byteStart);
+                if (blobLen > 0 && blobLen <= remainingBytes)
+                {
+                    m_PlatformBlob = reader.ReadBytes(blobLen);
+                }
+                else if (blobLen > 0)
+                {
+                    // Invalid blob length - backtrack
+                    reader.Position -= 4;
+                }
+                // Always align after PlatformBlob array (even if empty)
                 reader.AlignStream();
             }
             var image_data_size = reader.ReadInt32();
