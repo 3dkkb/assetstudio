@@ -166,6 +166,7 @@ namespace AssetStudio.GUI
             dumpTextBox = new System.Windows.Forms.TextBox();
             statusStrip1 = new System.Windows.Forms.StatusStrip();
             toolStripStatusLabel1 = new System.Windows.Forms.ToolStripStatusLabel();
+            statusLabelAssetCount = new System.Windows.Forms.ToolStripStatusLabel();
             timer = new System.Windows.Forms.Timer(components);
             openFileDialog1 = new System.Windows.Forms.OpenFileDialog();
             contextMenuStrip1 = new System.Windows.Forms.ContextMenuStrip(components);
@@ -853,8 +854,10 @@ namespace AssetStudio.GUI
             // 
             // splitContainer1.Panel2
             // 
+            // Note: Add in reverse dock order - Bottom-docked statusStrip last so it gets space first
             splitContainer1.Panel2.Controls.Add(tabControl2);
             splitContainer1.Panel2.Controls.Add(statusStrip1);
+            statusStrip1.Dock = System.Windows.Forms.DockStyle.Bottom;
             splitContainer1.Panel2MinSize = 400;
             splitContainer1.Size = new System.Drawing.Size(1264, 657);
             splitContainer1.SplitterDistance = 482;
@@ -938,6 +941,7 @@ namespace AssetStudio.GUI
             assetListView.ItemSelectionChanged += selectAsset;
             assetListView.RetrieveVirtualItem += assetListView_RetrieveVirtualItem;
             assetListView.MouseClick += assetListView_MouseClick;
+            assetListView.KeyDown += assetListView_KeyDown;
             // 
             // columnHeaderName
             // 
@@ -1289,7 +1293,7 @@ namespace AssetStudio.GUI
             // 
             // statusStrip1
             // 
-            statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { toolStripStatusLabel1 });
+            statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { toolStripStatusLabel1, statusLabelAssetCount });
             statusStrip1.Location = new System.Drawing.Point(0, 633);
             statusStrip1.Name = "statusStrip1";
             statusStrip1.Size = new System.Drawing.Size(776, 22);
@@ -1300,10 +1304,18 @@ namespace AssetStudio.GUI
             // 
             toolStripStatusLabel1.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             toolStripStatusLabel1.Name = "toolStripStatusLabel1";
-            toolStripStatusLabel1.Size = new System.Drawing.Size(761, 17);
+            toolStripStatusLabel1.Size = new System.Drawing.Size(611, 17);
             toolStripStatusLabel1.Spring = true;
-            toolStripStatusLabel1.Text = "Ready to go";
+            toolStripStatusLabel1.Text = "Ready";
             toolStripStatusLabel1.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            // 
+            // statusLabelAssetCount
+            // 
+            statusLabelAssetCount.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            statusLabelAssetCount.Name = "statusLabelAssetCount";
+            statusLabelAssetCount.Size = new System.Drawing.Size(150, 17);
+            statusLabelAssetCount.Text = "";
+            statusLabelAssetCount.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // timer
             // 
@@ -1432,6 +1444,7 @@ namespace AssetStudio.GUI
         private System.Windows.Forms.ProgressBar progressBar1;
         private System.Windows.Forms.StatusStrip statusStrip1;
         private System.Windows.Forms.ToolStripStatusLabel toolStripStatusLabel1;
+        private System.Windows.Forms.ToolStripStatusLabel statusLabelAssetCount;
         private System.Windows.Forms.Panel progressbarPanel;
         private System.Windows.Forms.ToolStripMenuItem exportFilteredAssetsMenuItem;
         private System.Windows.Forms.ToolStripMenuItem modelToolStripMenuItem;

@@ -447,6 +447,7 @@ namespace AssetStudio.GUI
                 log += $" and {m_ObjectsCount - objectsCount} assets failed to read";
             }
             StatusStripUpdate(log);
+            UpdateAssetCountStatus();
         }
 
         private void typeToolStripMenuItem_Click(object sender, EventArgs e)
@@ -664,6 +665,7 @@ namespace AssetStudio.GUI
                     break;
                 case 1:
                     listSearch.Select();
+                    UpdateAssetCountStatus();
                     break;
             }
         }
@@ -868,7 +870,6 @@ namespace AssetStudio.GUI
             fontPreviewBox.Visible = false;
             FMODpanel.Visible = false;
             glControl.Visible = false;
-            StatusStripUpdate("");
 
             FMODreset();
 
@@ -890,6 +891,9 @@ namespace AssetStudio.GUI
                     }
                 }
             }
+
+            // Update asset count status on selection change
+            UpdateAssetCountStatus();
         }
 
         private void classesListView_ItemSelectionChanged(object sender, ListViewItemSelectionChangedEventArgs e)
@@ -901,7 +905,6 @@ namespace AssetStudio.GUI
             fontPreviewBox.Visible = false;
             FMODpanel.Visible = false;
             glControl.Visible = false;
-            StatusStripUpdate("");
             if (e.IsSelected)
             {
                 classTextBox.Text = ((TypeTreeItem)classesListView.SelectedItems[0]).ToString();
@@ -1600,6 +1603,7 @@ namespace AssetStudio.GUI
             sortColumn = -1;
             reverseSort = false;
             listSearch.Text = string.Empty;
+            statusLabelAssetCount.Text = "";
 
             var count = filterTypeToolStripMenuItem.DropDownItems.Count;
             for (var i = 1; i < count; i++)
@@ -1608,7 +1612,7 @@ namespace AssetStudio.GUI
             }
 
             FMODreset();
-            StatusStripUpdate("Reset successfully !!");
+            StatusStripUpdate("Ready");
         }
 
         private void assetListView_MouseClick(object sender, MouseEventArgs e)
@@ -1981,6 +1985,68 @@ namespace AssetStudio.GUI
             }
             assetListView.VirtualListSize = visibleAssets.Count;
             assetListView.EndUpdate();
+            UpdateAssetCountStatus();
+        }
+
+        private void UpdateAssetCountStatus()
+        {
+            var selectedCount = assetListView.SelectedIndices.Count;
+            var filteredCount = visibleAssets.Count;
+            var totalCount = exportableAssets.Count;
+
+            string statusText;
+            if (selectedCount > 0)
+            {
+                statusText = $"Selected: {selectedCount}";
+                if (filteredCount != totalCount)
+                {
+                    statusText += $" | Filtered: {filteredCount}";
+                }
+                statusText += $" | Total: {totalCount}";
+            }
+            else if (filteredCount != totalCount)
+            {
+                statusText = $"Filtered: {filteredCount} | Total: {totalCount}";
+            }
+            else
+            {
+                statusText = $"Total: {totalCount}";
+            }
+
+            if (InvokeRequired)
+            {
+                BeginInvoke(() => { statusLabelAssetCount.Text = statusText; });
+            }
+            else
+            {
+                statusLabelAssetCount.Text = statusText;
+            }
+        }
+
+        private void assetListView_KeyDown(object sender, KeyEventArgs e)
+        {
+            // Ctrl+A to select all visible/filtered assets
+            if (e.Control && e.KeyCode == Keys.A)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                SelectAllFilteredAssets();
+            }
+        }
+
+        private void SelectAllFilteredAssets()
+        {
+            if (visibleAssets.Count == 0)
+                return;
+
+            assetListView.BeginUpdate();
+            // For virtual ListView, we need to use SelectedIndices
+            for (int i = 0; i < visibleAssets.Count; i++)
+            {
+                assetListView.SelectedIndices.Add(i);
+            }
+            assetListView.EndUpdate();
+            UpdateAssetCountStatus();
         }
 
         private async void ExportAssets(ExportFilter type, ExportType exportType)
