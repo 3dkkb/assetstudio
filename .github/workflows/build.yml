@@ -7,53 +7,59 @@ on:
     paths-ignore:
       - '**/LICENSE'
       - '**/README.md'
-      - '**/build.yml'
       - '**/.gitignore'
       - '**/.gitattributes'
+      - '*.md'
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v3
-      - uses: microsoft/setup-msbuild@v1.1
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Nuget Restore
-        run: nuget restore
-
-      - name: Build .Net7
-        run: msbuild /t:AssetStudio_GUI:publish /p:Configuration=Release /p:TargetFramework=net7.0-windows /p:SelfContained=false /verbosity:minimal
-
-      - name: Build .Net8
-        run: msbuild /t:AssetStudio_GUI:publish /p:Configuration=Release /p:TargetFramework=net8.0-windows /p:SelfContained=false /verbosity:minimal
-
-      - name: Build .Net7 CLI
-        run: msbuild /t:AssetStudio_CLI:publish /p:Configuration=Release /p:TargetFramework=net7.0-windows /p:SelfContained=false /verbosity:minimal
-
-      - name: Build .Net8 CLI
-        run: msbuild /t:AssetStudio_CLI:publish /p:Configuration=Release /p:TargetFramework=net8.0-windows /p:SelfContained=false /verbosity:minimal
-
-      - name: Upload .Net7 Artifact
-        uses: actions/upload-artifact@v3
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
         with:
-          name: net7.0-${{ github.sha }}
-          path: AssetStudio.GUI/bin/Release/net7.0-windows/publish
+          dotnet-version: |
+            8.0.x
+            10.0.x
 
-      - name: Upload .Net8 Artifact
-        uses: actions/upload-artifact@v3
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
         with:
-          name: net8.0-${{ github.sha }}
-          path: AssetStudio.GUI/bin/Release/net8.0-windows/publish
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
 
-      - name: Upload .Net7 CLI Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: net7.0-${{ github.sha }}
-          path: AssetStudio.GUI/bin/Release/net7.0-windows/publish
+      - name: Restore dependencies
+        run: dotnet restore AssetStudio.sln
 
-      - name: Upload .Net8 CLI Artifact
-        uses: actions/upload-artifact@v3
+      - name: Build CLI (net8.0-windows)
+        run: dotnet build AssetStudio.CLI/AssetStudio.CLI.csproj -c Release -f net8.0-windows --no-restore
+
+      - name: Build GUI (net8.0-windows)
+        run: dotnet build AssetStudio.GUI/AssetStudio.GUI.csproj -c Release -f net8.0-windows --no-restore
+
+      - name: Build CLI (net10.0-windows)
+        run: dotnet build AssetStudio.CLI/AssetStudio.CLI.csproj -c Release -f net10.0-windows --no-restore
+
+      - name: Build GUI (net10.0-windows)
+        run: dotnet build AssetStudio.GUI/AssetStudio.GUI.csproj -c Release -f net10.0-windows --no-restore
+
+      - name: Upload .NET 8 Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: net8.0-${{ github.sha }}
-          path: AssetStudio.GUI/bin/Release/net8.0-windows/publish
+          name: AssetStudio-net8.0-${{ github.sha }}
+          path: AssetStudio.GUI/bin/Release/net8.0-windows/
+          retention-days: 14
+
+      - name: Upload .NET 10 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AssetStudio-net10.0-${{ github.sha }}
+          path: AssetStudio.GUI/bin/Release/net10.0-windows/
+          retention-days: 14
