@@ -778,47 +778,61 @@ namespace AssetStudio
         public SerializedProgram(ObjectReader reader)
         {
             var version = reader.version;
+            var parseStage = "m_SubPrograms";
 
-            int numSubPrograms = reader.ReadInt32();
-            m_SubPrograms = new List<SerializedSubProgram>();
-            for (int i = 0; i < numSubPrograms; i++)
+            try
             {
-                m_SubPrograms.Add(new SerializedSubProgram(reader));
-            }
-
-            if ((version[0] == 2021 && version[1] > 3) ||
-               version[0] == 2021 && version[1] == 3 && version[2] >= 10 || //2021.3.10f1 and up
-               (version[0] == 2022 && version[1] > 1) ||
-               version[0] == 2022 && version[1] == 1 && version[2] >= 13) //2022.1.13f1 and up
-            {
-                int numPlayerSubPrograms = reader.ReadInt32();
-                m_PlayerSubPrograms = new List<List<SerializedPlayerSubProgram>>();
-                for (int i = 0; i < numPlayerSubPrograms; i++)
+                int numSubPrograms = reader.ReadInt32();
+                m_SubPrograms = new List<SerializedSubProgram>();
+                for (int i = 0; i < numSubPrograms; i++)
                 {
-                    m_PlayerSubPrograms.Add(new List<SerializedPlayerSubProgram>());
-                    int numPlatformPrograms = reader.ReadInt32();
-                    for (int j = 0; j < numPlatformPrograms; j++)
-                    {
-                        m_PlayerSubPrograms[i].Add(new SerializedPlayerSubProgram(reader));
-                    }
+                    m_SubPrograms.Add(new SerializedSubProgram(reader));
                 }
 
-                m_ParameterBlobIndices = reader.ReadUInt32ArrayArray();
-            }
+                if ((reader.serializedType?.m_Type?.m_Nodes?.Any(x => x.m_Name == "m_PlayerSubPrograms") == true) ||
+                   (version[0] == 2021 && version[1] > 3) ||
+                   version[0] == 2021 && version[1] == 3 && version[2] >= 10 || //2021.3.10f1 and up
+                   (version[0] == 2022 && version[1] > 1) ||
+                   version[0] == 2022 && version[1] == 1 && version[2] >= 13 ||
+                   version[0] >= 2023) //2023 and up, including Unity 6
+                {
+                    parseStage = "m_PlayerSubPrograms";
+                    int numPlayerSubPrograms = reader.ReadInt32();
+                    m_PlayerSubPrograms = new List<List<SerializedPlayerSubProgram>>();
+                    for (int i = 0; i < numPlayerSubPrograms; i++)
+                    {
+                        m_PlayerSubPrograms.Add(new List<SerializedPlayerSubProgram>());
+                        int numPlatformPrograms = reader.ReadInt32();
+                        for (int j = 0; j < numPlatformPrograms; j++)
+                        {
+                            m_PlayerSubPrograms[i].Add(new SerializedPlayerSubProgram(reader));
+                        }
+                    }
 
-            if ((version[0] == 2020 && version[1] > 3) ||
-               (version[0] == 2020 && version[1] == 3 && version[2] >= 2) || //2020.3.2f1 and up
-               (version[0] > 2021) ||
-               (version[0] == 2021 && version[1] > 1) ||
-               (version[0] == 2021 && version[1] == 1 && version[2] >= 1)) //2021.1.1f1 and up
-            {
-                m_CommonParameters = new SerializedProgramParameters(reader);
-            }
+                    parseStage = "m_ParameterBlobIndices";
+                    m_ParameterBlobIndices = reader.ReadUInt32ArrayArray();
+                }
 
-            if (version[0] > 2022 || (version[0] == 2022 && version[1] >= 1)) //2022.1 and up
+                if ((version[0] == 2020 && version[1] > 3) ||
+                   (version[0] == 2020 && version[1] == 3 && version[2] >= 2) || //2020.3.2f1 and up
+                   (version[0] > 2021) ||
+                   (version[0] == 2021 && version[1] > 1) ||
+                   (version[0] == 2021 && version[1] == 1 && version[2] >= 1)) //2021.1.1f1 and up
+                {
+                    parseStage = "m_CommonParameters";
+                    m_CommonParameters = new SerializedProgramParameters(reader);
+                }
+
+                if (version[0] > 2022 || (version[0] == 2022 && version[1] >= 1)) //2022.1 and up
+                {
+                    parseStage = "m_SerializedKeywordStateMask";
+                    m_SerializedKeywordStateMask = reader.ReadUInt16Array();
+                    reader.AlignStream();
+                }
+            }
+            catch (Exception ex)
             {
-                m_SerializedKeywordStateMask = reader.ReadUInt16Array();
-                reader.AlignStream();
+                throw new IOException($"SerializedProgram parse failed at '{parseStage}' (pos {reader.Position - reader.byteStart}/{reader.byteSize})", ex);
             }
         }
     }
@@ -856,60 +870,88 @@ namespace AssetStudio
         public SerializedPass(ObjectReader reader)
         {
             var version = reader.version;
+            var parseStage = "m_EditorDataHash";
 
-            if (version[0] > 2020 || (version[0] == 2020 && version[1] >= 2)) //2020.2 and up
+            try
             {
-                int numEditorDataHash = reader.ReadInt32();
-                m_EditorDataHash = new List<Hash128>();
-                for (int i = 0; i < numEditorDataHash; i++)
+                if ((version[0] > 2020 || (version[0] == 2020 && version[1] >= 2)) && version[0] < 6000) //2020.2 to 2021.x
                 {
-                    m_EditorDataHash.Add(new Hash128(reader));
+                    int numEditorDataHash = reader.ReadInt32();
+                    m_EditorDataHash = new List<Hash128>();
+                    for (int i = 0; i < numEditorDataHash; i++)
+                    {
+                        m_EditorDataHash.Add(new Hash128(reader));
+                    }
+                    reader.AlignStream();
+                    parseStage = "m_Platforms";
+                    m_Platforms = reader.ReadUInt8Array();
+                    reader.AlignStream();
+                    if (version[0] < 2021 || (version[0] == 2021 && version[1] < 2)) //2021.1 and down
+                    {
+                        parseStage = "m_LocalKeywordMask";
+                        m_LocalKeywordMask = reader.ReadUInt16Array();
+                        reader.AlignStream();
+                        parseStage = "m_GlobalKeywordMask";
+                        m_GlobalKeywordMask = reader.ReadUInt16Array();
+                        reader.AlignStream();
+                    }
+                }
+
+                parseStage = "m_NameIndices";
+                int numIndices = reader.ReadInt32();
+                m_NameIndices = new List<KeyValuePair<string, int>>();
+                for (int i = 0; i < numIndices; i++)
+                {
+                    m_NameIndices.Add(new KeyValuePair<string, int>(reader.ReadAlignedString(), reader.ReadInt32()));
+                }
+
+                parseStage = "m_Type";
+                m_Type = (PassType)reader.ReadInt32();
+                parseStage = "m_State";
+                m_State = new SerializedShaderState(reader);
+                parseStage = "m_ProgramMask";
+                m_ProgramMask = reader.ReadUInt32();
+                parseStage = "progVertex";
+                progVertex = new SerializedProgram(reader);
+                parseStage = "progFragment";
+                progFragment = new SerializedProgram(reader);
+                parseStage = "progGeometry";
+                progGeometry = new SerializedProgram(reader);
+                parseStage = "progHull";
+                progHull = new SerializedProgram(reader);
+                parseStage = "progDomain";
+                progDomain = new SerializedProgram(reader);
+                if (version[0] > 2019 || (version[0] == 2019 && version[1] >= 3)) //2019.3 and up
+                {
+                    parseStage = "progRayTracing";
+                    progRayTracing = new SerializedProgram(reader);
+                }
+                parseStage = "m_HasInstancingVariant";
+                m_HasInstancingVariant = reader.ReadBoolean();
+                if (version[0] >= 2018) //2018 and up
+                {
+                    parseStage = "m_HasProceduralInstancingVariant";
+                    var m_HasProceduralInstancingVariant = reader.ReadBoolean();
                 }
                 reader.AlignStream();
-                m_Platforms = reader.ReadUInt8Array();
-                reader.AlignStream();
-                if (version[0] < 2021 || (version[0] == 2021 && version[1] < 2)) //2021.1 and down
+                parseStage = "m_UseName";
+                m_UseName = reader.ReadAlignedString();
+                parseStage = "m_Name";
+                m_Name = reader.ReadAlignedString();
+                parseStage = "m_TextureName";
+                m_TextureName = reader.ReadAlignedString();
+                parseStage = "m_Tags";
+                m_Tags = new SerializedTagMap(reader);
+                if (version[0] == 2021 && version[1] >= 2) //2021.2 ~2021.x
                 {
-                    m_LocalKeywordMask = reader.ReadUInt16Array();
-                    reader.AlignStream();
-                    m_GlobalKeywordMask = reader.ReadUInt16Array();
+                    parseStage = "m_SerializedKeywordStateMask";
+                    m_SerializedKeywordStateMask = reader.ReadUInt16Array();
                     reader.AlignStream();
                 }
             }
-
-            int numIndices = reader.ReadInt32();
-            m_NameIndices = new List<KeyValuePair<string, int>>();
-            for (int i = 0; i < numIndices; i++)
+            catch (Exception ex)
             {
-                m_NameIndices.Add(new KeyValuePair<string, int>(reader.ReadAlignedString(), reader.ReadInt32()));
-            }
-
-            m_Type = (PassType)reader.ReadInt32();
-            m_State = new SerializedShaderState(reader);
-            m_ProgramMask = reader.ReadUInt32();
-            progVertex = new SerializedProgram(reader);
-            progFragment = new SerializedProgram(reader);
-            progGeometry = new SerializedProgram(reader);
-            progHull = new SerializedProgram(reader);
-            progDomain = new SerializedProgram(reader);
-            if (version[0] > 2019 || (version[0] == 2019 && version[1] >= 3)) //2019.3 and up
-            {
-                progRayTracing = new SerializedProgram(reader);
-            }
-            m_HasInstancingVariant = reader.ReadBoolean();
-            if (version[0] >= 2018) //2018 and up
-            {
-                var m_HasProceduralInstancingVariant = reader.ReadBoolean();
-            }
-            reader.AlignStream();
-            m_UseName = reader.ReadAlignedString();
-            m_Name = reader.ReadAlignedString();
-            m_TextureName = reader.ReadAlignedString();
-            m_Tags = new SerializedTagMap(reader);
-            if (version[0] == 2021 && version[1] >= 2) //2021.2 ~2021.x
-            {
-                m_SerializedKeywordStateMask = reader.ReadUInt16Array();
-                reader.AlignStream();
+                throw new IOException($"SerializedPass parse failed at '{parseStage}' (pos {reader.Position - reader.byteStart}/{reader.byteSize})", ex);
             }
         }
     }
@@ -937,15 +979,25 @@ namespace AssetStudio
 
         public SerializedSubShader(ObjectReader reader)
         {
-            int numPasses = reader.ReadInt32();
-            m_Passes = new List<SerializedPass>();
-            for (int i = 0; i < numPasses; i++)
+            var parseStage = "m_Passes";
+            try
             {
-                m_Passes.Add(new SerializedPass(reader));
-            }
+                int numPasses = reader.ReadInt32();
+                m_Passes = new List<SerializedPass>();
+                for (int i = 0; i < numPasses; i++)
+                {
+                    m_Passes.Add(new SerializedPass(reader));
+                }
 
-            m_Tags = new SerializedTagMap(reader);
-            m_LOD = reader.ReadInt32();
+                parseStage = "m_Tags";
+                m_Tags = new SerializedTagMap(reader);
+                parseStage = "m_LOD";
+                m_LOD = reader.ReadInt32();
+            }
+            catch (Exception ex)
+            {
+                throw new IOException($"SerializedSubShader parse failed at '{parseStage}' (pos {reader.Position - reader.byteStart}/{reader.byteSize})", ex);
+            }
         }
     }
 
@@ -989,46 +1041,63 @@ namespace AssetStudio
         public SerializedShader(ObjectReader reader)
         {
             var version = reader.version;
+            var parseStage = "m_PropInfo";
 
-            m_PropInfo = new SerializedProperties(reader);
-
-            int numSubShaders = reader.ReadInt32();
-            m_SubShaders = new List<SerializedSubShader>();
-            for (int i = 0; i < numSubShaders; i++)
+            try
             {
-                m_SubShaders.Add(new SerializedSubShader(reader));
-            }
+                m_PropInfo = new SerializedProperties(reader);
 
-            if (version[0] > 2021 || (version[0] == 2021 && version[1] >= 2)) //2021.2 and up
-            {
-                m_KeywordNames = reader.ReadStringArray();
-                m_KeywordFlags = reader.ReadUInt8Array();
+                parseStage = "m_SubShaders";
+                int numSubShaders = reader.ReadInt32();
+                m_SubShaders = new List<SerializedSubShader>();
+                for (int i = 0; i < numSubShaders; i++)
+                {
+                    m_SubShaders.Add(new SerializedSubShader(reader));
+                }
+
+                if (version[0] > 2021 || (version[0] == 2021 && version[1] >= 2)) //2021.2 and up
+                {
+                    parseStage = "m_KeywordNames";
+                    m_KeywordNames = reader.ReadStringArray();
+                    parseStage = "m_KeywordFlags";
+                    m_KeywordFlags = reader.ReadUInt8Array();
+                    reader.AlignStream();
+                }
+
+                parseStage = "m_Name";
+                m_Name = reader.ReadAlignedString();
+                parseStage = "m_CustomEditorName";
+                m_CustomEditorName = reader.ReadAlignedString();
+                parseStage = "m_FallbackName";
+                m_FallbackName = reader.ReadAlignedString();
+
+                parseStage = "m_Dependencies";
+                int numDependencies = reader.ReadInt32();
+                m_Dependencies = new List<SerializedShaderDependency>();
+                for (int i = 0; i < numDependencies; i++)
+                {
+                    m_Dependencies.Add(new SerializedShaderDependency(reader));
+                }
+
+                if (version[0] >= 2021) //2021.1 and up
+                {
+                    parseStage = "m_CustomEditorForRenderPipelines";
+                    int m_CustomEditorForRenderPipelinesSize = reader.ReadInt32();
+                    m_CustomEditorForRenderPipelines = new List<SerializedCustomEditorForRenderPipeline>();
+                    for (int i = 0; i < m_CustomEditorForRenderPipelinesSize; i++)
+                    {
+                        m_CustomEditorForRenderPipelines.Add(new SerializedCustomEditorForRenderPipeline(reader));
+                    }
+                }
+
+                parseStage = "m_DisableNoSubshadersMessage";
+                m_DisableNoSubshadersMessage = reader.ReadBoolean();
                 reader.AlignStream();
             }
-
-            m_Name = reader.ReadAlignedString();
-            m_CustomEditorName = reader.ReadAlignedString();
-            m_FallbackName = reader.ReadAlignedString();
-
-            int numDependencies = reader.ReadInt32();
-            m_Dependencies = new List<SerializedShaderDependency>();
-            for (int i = 0; i < numDependencies; i++)
+            catch (Exception ex)
             {
-                m_Dependencies.Add(new SerializedShaderDependency(reader));
+                throw new IOException($"SerializedShader parse failed at '{parseStage}' (pos {reader.Position - reader.byteStart}/{reader.byteSize})", ex);
             }
-
-            if (version[0] >= 2021) //2021.1 and up
-            {
-                int m_CustomEditorForRenderPipelinesSize = reader.ReadInt32();
-                m_CustomEditorForRenderPipelines = new List<SerializedCustomEditorForRenderPipeline>();
-                for (int i = 0; i < m_CustomEditorForRenderPipelinesSize; i++)
-                {
-                    m_CustomEditorForRenderPipelines.Add(new SerializedCustomEditorForRenderPipeline(reader));
-                }
-            }
-
-            m_DisableNoSubshadersMessage = reader.ReadBoolean();
-            reader.AlignStream();
         }
     }
 
@@ -1081,93 +1150,127 @@ namespace AssetStudio
 
         public Shader(ObjectReader reader) : base(reader)
         {
-            // Unity 6000+ has format changes that break manual parsing
-            // Skip shader parsing entirely - we don't need it for texture extraction
-            if (version[0] >= 6000)
+            var parseStage = "init";
+            try
             {
-                Logger.Verbose($"Skipping Shader manual parsing for Unity {version[0]}.{version[1]} (use TypeTree dump if needed)");
-                // Read remaining bytes to advance stream position correctly
-                var remaining = reader.byteSize - (reader.Position - reader.byteStart);
-                if (remaining > 0)
+                if (version[0] == 5 && version[1] >= 5 || version[0] > 5) //5.5 and up
                 {
-                    reader.ReadBytes((int)remaining);
-                }
-                return;
-            }
+                    parseStage = "m_ParsedForm";
+                    m_ParsedForm = new SerializedShader(reader);
+                    parseStage = "platforms";
+                    platforms = reader.ReadUInt32Array().Select(x => (ShaderCompilerPlatform)x).ToArray();
+                    if (version[0] > 2019 || (version[0] == 2019 && version[1] >= 3)) //2019.3 and up
+                    {
+                        parseStage = "offsets[][]";
+                        offsets = reader.ReadUInt32ArrayArray();
+                        parseStage = "compressedLengths[][]";
+                        compressedLengths = reader.ReadUInt32ArrayArray();
+                        parseStage = "decompressedLengths[][]";
+                        decompressedLengths = reader.ReadUInt32ArrayArray();
+                    }
+                    else
+                    {
+                        parseStage = "offsets[]";
+                        offsets = reader.ReadUInt32Array().Select(x => new[] { x }).ToArray();
+                        parseStage = "compressedLengths[]";
+                        compressedLengths = reader.ReadUInt32Array().Select(x => new[] { x }).ToArray();
+                        parseStage = "decompressedLengths[]";
+                        decompressedLengths = reader.ReadUInt32Array().Select(x => new[] { x }).ToArray();
+                    }
+                    parseStage = "compressedBlob";
+                    compressedBlob = reader.ReadUInt8Array();
+                    reader.AlignStream();
+                    if (reader.Game.Type.IsGISubGroup())
+                    {
+                        if (compressedBlob != null && compressedBlob.Length >= 4 &&
+                            BinaryPrimitives.ReadInt32LittleEndian(compressedBlob) == -1)
+                        {
+                            parseStage = "blobDataBlocks";
+                            compressedBlob = reader.ReadUInt8Array(); //blobDataBlocks
+                            reader.AlignStream();
+                        }
+                    }
 
-            if (version[0] == 5 && version[1] >= 5 || version[0] > 5) //5.5 and up
-            {
-                m_ParsedForm = new SerializedShader(reader);
-                platforms = reader.ReadUInt32Array().Select(x => (ShaderCompilerPlatform)x).ToArray();
-                if (version[0] > 2019 || (version[0] == 2019 && version[1] >= 3)) //2019.3 and up
-                {
-                    offsets = reader.ReadUInt32ArrayArray();
-                    compressedLengths = reader.ReadUInt32ArrayArray();
-                    decompressedLengths = reader.ReadUInt32ArrayArray();
+                    if (reader.Game.Type.IsLoveAndDeepspace())
+                    {
+                        parseStage = "codeOffsets";
+                        var codeOffsets = reader.ReadUInt32ArrayArray();
+                        parseStage = "codeCompressedLengths";
+                        var codeCompressedLengths = reader.ReadUInt32ArrayArray();
+                        parseStage = "codeDecompressedLengths";
+                        var codeDecompressedLengths = reader.ReadUInt32ArrayArray();
+                        parseStage = "codeCompressedBlob";
+                        var codeCompressedBlob = reader.ReadUInt8Array();
+                        reader.AlignStream();
+                    }
+
+                    if ((reader.serializedType?.m_Type?.m_Nodes?.Any(x => x.m_Name == "stageCounts") == true) ||
+                        (version[0] == 2021 && version[1] > 3) ||
+                        version[0] == 2021 && version[1] == 3 && version[2] >= 12 || //2021.3.12f1 and up
+                        (version[0] == 2022 && version[1] > 1) ||
+                        version[0] == 2022 && version[1] == 1 && version[2] >= 21 ||
+                        version[0] >= 2023) //2023 and up, including Unity 6
+                    {
+                        parseStage = "stageCounts";
+                        stageCounts = reader.ReadUInt32Array();
+                    }
+
+                    parseStage = "dependencies";
+                    var m_DependenciesCount = reader.ReadInt32();
+                    for (int i = 0; i < m_DependenciesCount; i++)
+                    {
+                        new PPtr<Shader>(reader);
+                    }
+
+                    if (version[0] >= 2018)
+                    {
+                        parseStage = "nonModifiableTextures";
+                        var m_NonModifiableTexturesCount = reader.ReadInt32();
+                        for (int i = 0; i < m_NonModifiableTexturesCount; i++)
+                        {
+                            var first = reader.ReadAlignedString();
+                            new PPtr<Texture>(reader);
+                        }
+                    }
+
+                    parseStage = "m_ShaderIsBaked";
+                    var m_ShaderIsBaked = reader.ReadBoolean();
+                    reader.AlignStream();
                 }
                 else
                 {
-                    offsets = reader.ReadUInt32Array().Select(x => new[] { x }).ToArray();
-                    compressedLengths = reader.ReadUInt32Array().Select(x => new[] { x }).ToArray();
-                    decompressedLengths = reader.ReadUInt32Array().Select(x => new[] { x }).ToArray();
-                }
-                compressedBlob = reader.ReadUInt8Array();
-                reader.AlignStream();
-                if (reader.Game.Type.IsGISubGroup())
-                {
-                    if (BinaryPrimitives.ReadInt32LittleEndian(compressedBlob) == -1)
-                    {
-                        compressedBlob = reader.ReadUInt8Array(); //blobDataBlocks
-                        reader.AlignStream();
-                    }
-                }
-
-                if (reader.Game.Type.IsLoveAndDeepspace())
-                {
-                    var codeOffsets = reader.ReadUInt32ArrayArray();
-                    var codeCompressedLengths = reader.ReadUInt32ArrayArray();
-                    var codeDecompressedLengths = reader.ReadUInt32ArrayArray();
-                    var codeCompressedBlob = reader.ReadUInt8Array();
+                    parseStage = "m_Script";
+                    m_Script = reader.ReadUInt8Array();
                     reader.AlignStream();
-                }
-
-                if ((version[0] == 2021 && version[1] > 3) ||
-                    version[0] == 2021 && version[1] == 3 && version[2] >= 12 || //2021.3.12f1 and up
-                    (version[0] == 2022 && version[1] > 1) ||
-                    version[0] == 2022 && version[1] == 1 && version[2] >= 21) //2022.1.21f1 and up
-                {
-                    stageCounts = reader.ReadUInt32Array();
-                }
-
-                var m_DependenciesCount = reader.ReadInt32();
-                for (int i = 0; i < m_DependenciesCount; i++)
-                {
-                    new PPtr<Shader>(reader);
-                }
-
-                if (version[0] >= 2018)
-                {
-                    var m_NonModifiableTexturesCount = reader.ReadInt32();
-                    for (int i = 0; i < m_NonModifiableTexturesCount; i++)
+                    parseStage = "m_PathName";
+                    var m_PathName = reader.ReadAlignedString();
+                    if (version[0] == 5 && version[1] >= 3) //5.3 - 5.4
                     {
-                        var first = reader.ReadAlignedString();
-                        new PPtr<Texture>(reader);
+                        parseStage = "decompressedSize";
+                        decompressedSize = reader.ReadUInt32();
+                        parseStage = "m_SubProgramBlob";
+                        m_SubProgramBlob = reader.ReadUInt8Array();
                     }
                 }
-
-                var m_ShaderIsBaked = reader.ReadBoolean();
-                reader.AlignStream();
             }
-            else
+            catch (Exception ex)
             {
-                m_Script = reader.ReadUInt8Array();
-                reader.AlignStream();
-                var m_PathName = reader.ReadAlignedString();
-                if (version[0] == 5 && version[1] >= 3) //5.3 - 5.4
+                var versionText = version != null && version.Length > 0 ? string.Join(".", version) : "unknown";
+                var errorMessage = ex.Message;
+                var inner = ex.InnerException;
+                while (inner != null)
                 {
-                    decompressedSize = reader.ReadUInt32();
-                    m_SubProgramBlob = reader.ReadUInt8Array();
+                    errorMessage += $" --> {inner.Message}";
+                    inner = inner.InnerException;
                 }
+                Logger.Warning($"Failed to parse Shader '{m_Name}' (Unity {versionText}) at stage '{parseStage}', position {reader.Position - reader.byteStart}/{reader.byteSize}: {errorMessage}");
+            }
+
+            // Keep stream aligned to object end for consistency in diagnostic paths.
+            var remaining = reader.byteSize - (reader.Position - reader.byteStart);
+            if (remaining > 0 && remaining <= int.MaxValue)
+            {
+                reader.ReadBytes((int)remaining);
             }
         }
     }

@@ -1178,8 +1178,31 @@ namespace AssetStudio.GUI
                 return;
             }
 
-            var str = m_Shader.Convert();
-            PreviewText(str == null ? "Serialized Shader can't be read" : str.Replace("\n", "\r\n"));
+            string str;
+            try
+            {
+                str = m_Shader.Convert();
+                if (!string.IsNullOrWhiteSpace(str) &&
+                    str.Contains("// unable to convert shader to ShaderLab/HLSL text", StringComparison.Ordinal))
+                {
+                    var dump = m_Shader.Dump();
+                    if (!string.IsNullOrWhiteSpace(dump))
+                    {
+                        str = dump;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"Shader preview conversion failed for '{m_Shader.Name}': {ex.Message}");
+                str = m_Shader.Dump();
+                if (string.IsNullOrWhiteSpace(str))
+                {
+                    str = $"Shader preview failed: {ex.Message}{Environment.NewLine}{Environment.NewLine}No ShaderLab/HLSL preview or TypeTree dump is available for this asset.";
+                }
+            }
+
+            PreviewText(string.IsNullOrWhiteSpace(str) ? "Serialized Shader can't be read" : str.Replace("\n", "\r\n"));
         }
 
         private void PreviewTextAsset(TextAsset m_TextAsset)

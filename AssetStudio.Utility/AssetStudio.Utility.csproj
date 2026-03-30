@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(ForceNet8Only)' == 'true'">net8.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(ForceNet8Only)' != 'true'">net8.0;net10.0</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <Version>1.36.00</Version>
     <AssemblyVersion>1.36.00</AssemblyVersion>
@@ -16,9 +17,20 @@
     <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="1.0.0-beta15" />
     <PackageReference Include="Vortice.D3DCompiler" Version="3.4.3-beta" />
   </ItemGroup>
-  <ItemGroup>
+  <ItemGroup Condition="'$(ForceNet8Only)' != 'true'">
     <ProjectReference Include="..\AssetStudio.PInvoke\AssetStudio.PInvoke.csproj" />
     <ProjectReference Include="..\AssetStudio.FBXWrapper\AssetStudio.FBXWrapper.csproj" />
     <ProjectReference Include="..\AssetStudio\AssetStudio.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(ForceNet8Only)' == 'true'">
+    <Reference Include="AssetStudio.PInvoke">
+      <HintPath>..\AssetStudio.PInvoke\bin\Debug\net8.0\AssetStudio.PInvoke.dll</HintPath>
+    </Reference>
+    <Reference Include="AssetStudio.FBXWrapper">
+      <HintPath>..\AssetStudio.FBXWrapper\bin\Debug\net8.0\AssetStudio.FBXWrapper.dll</HintPath>
+    </Reference>
+    <Reference Include="AssetStudio">
+      <HintPath>..\AssetStudio\bin\Debug\net8.0\AssetStudio.dll</HintPath>
+    </Reference>
   </ItemGroup>
 </Project>

@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -17,69 +18,165 @@ namespace AssetStudio
     {
         public static string Convert(this Shader shader)
         {
-            if (shader.m_SubProgramBlob != null) //5.3 - 5.4
+            if (shader == null)
             {
-                var decompressedBytes = new byte[shader.decompressedSize];
-                var numWrite = LZ4.Instance.Decompress(shader.m_SubProgramBlob, decompressedBytes);
-                if (numWrite != shader.decompressedSize)
-                {
-                    throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {shader.decompressedSize} bytes");
-                }
-                using (var blobReader = new EndianBinaryReader(new MemoryStream(decompressedBytes), EndianType.LittleEndian))
-                {
-                    var program = new ShaderProgram(blobReader, shader);
-                    program.Read(blobReader, 0);
-                    return header + program.Export(Encoding.UTF8.GetString(shader.m_Script));
-                }
+                return header + "// shader object is null";
             }
 
-            if (shader.compressedBlob != null) //5.5 and up
+            try
             {
-                return header + ConvertSerializedShader(shader);
+                if (shader.m_SubProgramBlob != null) //5.3 - 5.4
+                {
+                    var decompressedBytes = new byte[shader.decompressedSize];
+                    var numWrite = LZ4.Instance.Decompress(shader.m_SubProgramBlob, decompressedBytes);
+                    if (numWrite != shader.decompressedSize)
+                    {
+                        throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {shader.decompressedSize} bytes");
+                    }
+                    using (var blobReader = new EndianBinaryReader(new MemoryStream(decompressedBytes), EndianType.LittleEndian))
+                    {
+                        var program = new ShaderProgram(blobReader, shader);
+                        program.Read(blobReader, 0);
+                        return header + program.Export(GetScriptText(shader));
+                    }
+                }
+
+                if (shader.compressedBlob != null || shader.m_ParsedForm != null) //5.5 and up
+                {
+                    var serialized = ConvertSerializedShader(shader);
+                    if (!string.IsNullOrWhiteSpace(serialized))
+                    {
+                        return header + serialized;
+                    }
+                }
+
+                var script = GetScriptText(shader);
+                if (!string.IsNullOrWhiteSpace(script))
+                {
+                    return header + script;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"Shader conversion failed for '{shader.Name}': {ex.Message}");
             }
 
-            return header + Encoding.UTF8.GetString(shader.m_Script);
+            return header + "// unable to convert shader to ShaderLab/HLSL text";
         }
 
         private static string ConvertSerializedShader(Shader shader)
         {
+            if (shader.m_ParsedForm == null)
+            {
+                return null;
+            }
+
+            if (shader.platforms == null ||
+                shader.offsets == null ||
+                shader.compressedLengths == null ||
+                shader.decompressedLengths == null ||
+                shader.compressedBlob == null)
+            {
+                return ConvertSerializedShader(shader.m_ParsedForm, shader.platforms ?? Array.Empty<ShaderCompilerPlatform>(), Array.Empty<ShaderProgram>(), new Dictionary<(int PlatformIndex, int ChunkIndex), string>());
+            }
+
             var length = shader.platforms.Length;
             var shaderPrograms = new ShaderProgram[length];
+            var unknownChunkFallbacks = new Dictionary<(int PlatformIndex, int ChunkIndex), string>();
             for (var i = 0; i < length; i++)
             {
-                for (var j = 0; j < shader.offsets[i].Length; j++)
+                if (shader.offsets.Length <= i || shader.compressedLengths.Length <= i || shader.decompressedLengths.Length <= i ||
+                    shader.offsets[i] == null || shader.compressedLengths[i] == null || shader.decompressedLengths[i] == null)
                 {
-                    var offset = shader.offsets[i][j];
-                    var compressedLength = shader.compressedLengths[i][j];
-                    var decompressedLength = shader.decompressedLengths[i][j];
-                    var decompressedBytes = new byte[decompressedLength];
-                    if (shader.assetsFile.game.Type.IsGISubGroup())
+                    continue;
+                }
+                var chunkCount = Math.Min(shader.offsets[i].Length, Math.Min(shader.compressedLengths[i].Length, shader.decompressedLengths[i].Length));
+                for (var j = 0; j < chunkCount; j++)
+                {
+                    try
                     {
-                        Buffer.BlockCopy(shader.compressedBlob, (int)offset, decompressedBytes, 0, (int)decompressedLength);
-                    }
-                    else
-                    {
-                        var numWrite = LZ4.Instance.Decompress(shader.compressedBlob.AsSpan().Slice((int)offset, (int)compressedLength), decompressedBytes.AsSpan().Slice(0, (int)decompressedLength));
-                        if (numWrite != decompressedLength)
+                        var offset = shader.offsets[i][j];
+                        var compressedLength = shader.compressedLengths[i][j];
+                        var decompressedLength = shader.decompressedLengths[i][j];
+                        byte[] programBytes;
+                        if (shader.assetsFile.game.Type.IsGISubGroup())
                         {
-                            throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {decompressedLength} bytes");
+                            programBytes = new byte[decompressedLength];
+                            Buffer.BlockCopy(shader.compressedBlob, (int)offset, programBytes, 0, (int)decompressedLength);
+                        }
+                        else
+                        {
+                            try
+                            {
+                                programBytes = new byte[decompressedLength];
+                                var numWrite = LZ4.Instance.Decompress(shader.compressedBlob.AsSpan().Slice((int)offset, (int)compressedLength), programBytes.AsSpan().Slice(0, (int)decompressedLength));
+                                if (numWrite != decompressedLength)
+                                {
+                                    throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {decompressedLength} bytes");
+                                }
+                            }
+                            catch
+                            {
+                                if (!LooksLikeLegacyShaderProgramChunk(shader.compressedBlob, offset, compressedLength))
+                                {
+                                    unknownChunkFallbacks[(i, j)] = TryExtractUnknownChunkPreview(shader.compressedBlob, offset, compressedLength, shader.platforms[i]);
+                                    throw;
+                                }
+
+                                // Only fall back to raw chunk parsing when the payload starts like the legacy shader program container.
+                                programBytes = shader.compressedBlob.AsSpan().Slice((int)offset, (int)compressedLength).ToArray();
+                            }
+                        }
+                        using (var blobReader = new EndianBinaryReader(new MemoryStream(programBytes), EndianType.LittleEndian))
+                        {
+                            if (j == 0 || shaderPrograms[i] == null)
+                            {
+                                shaderPrograms[i] = new ShaderProgram(blobReader, shader);
+                            }
+                            shaderPrograms[i].Read(blobReader, j);
                         }
                     }
-                    using (var blobReader = new EndianBinaryReader(new MemoryStream(decompressedBytes), EndianType.LittleEndian))
+                    catch (Exception ex)
                     {
-                        if (j == 0)
-                        {
-                            shaderPrograms[i] = new ShaderProgram(blobReader, shader);
-                        }
-                        shaderPrograms[i].Read(blobReader, j);
+                        var offset = shader.offsets[i][j];
+                        var compressedLength = shader.compressedLengths[i][j];
+                        Logger.Warning($"Shader chunk decode failed for '{shader.Name}', platform index {i}, chunk {j}, offset={offset}, compressedLength={compressedLength}, decompressedLength={shader.decompressedLengths[i][j]}, blobLength={shader.compressedBlob?.Length ?? 0}: {ex.Message}");
                     }
                 }
             }
 
-            return ConvertSerializedShader(shader.m_ParsedForm, shader.platforms, shaderPrograms);
+            return ConvertSerializedShader(shader.m_ParsedForm, shader.platforms, shaderPrograms, unknownChunkFallbacks);
         }
 
-        private static string ConvertSerializedShader(SerializedShader m_ParsedForm, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms)
+        private static string GetScriptText(Shader shader)
+        {
+            if (shader.m_Script == null || shader.m_Script.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            return Encoding.UTF8.GetString(shader.m_Script).Replace("\0", string.Empty);
+        }
+
+        private static bool LooksLikeLegacyShaderProgramChunk(byte[] blob, uint offset, uint compressedLength)
+        {
+            if (blob == null || compressedLength < 4 || offset > int.MaxValue || compressedLength > int.MaxValue)
+            {
+                return false;
+            }
+
+            var start = (int)offset;
+            var length = (int)compressedLength;
+            if (start < 0 || length <= 0 || start > blob.Length - length)
+            {
+                return false;
+            }
+
+            var subProgramCount = BitConverter.ToInt32(blob, start);
+            return subProgramCount > 0 && subProgramCount < 0x10000;
+        }
+
+        private static string ConvertSerializedShader(SerializedShader m_ParsedForm, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms, Dictionary<(int PlatformIndex, int ChunkIndex), string> unknownChunkFallbacks)
         {
             var sb = new StringBuilder();
             sb.Append($"Shader \"{m_ParsedForm.m_Name}\" {{\n");
@@ -88,7 +185,7 @@ namespace AssetStudio
 
             foreach (var m_SubShader in m_ParsedForm.m_SubShaders)
             {
-                sb.Append(ConvertSerializedSubShader(m_SubShader, platforms, shaderPrograms));
+                sb.Append(ConvertSerializedSubShader(m_SubShader, platforms, shaderPrograms, unknownChunkFallbacks));
             }
 
             if (!string.IsNullOrEmpty(m_ParsedForm.m_FallbackName))
@@ -105,7 +202,7 @@ namespace AssetStudio
             return sb.ToString();
         }
 
-        private static string ConvertSerializedSubShader(SerializedSubShader m_SubShader, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms)
+        private static string ConvertSerializedSubShader(SerializedSubShader m_SubShader, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms, Dictionary<(int PlatformIndex, int ChunkIndex), string> unknownChunkFallbacks)
         {
             var sb = new StringBuilder();
             sb.Append("SubShader {\n");
@@ -118,13 +215,13 @@ namespace AssetStudio
 
             foreach (var m_Passe in m_SubShader.m_Passes)
             {
-                sb.Append(ConvertSerializedPass(m_Passe, platforms, shaderPrograms));
+                sb.Append(ConvertSerializedPass(m_Passe, platforms, shaderPrograms, unknownChunkFallbacks));
             }
             sb.Append("}\n");
             return sb.ToString();
         }
 
-        private static string ConvertSerializedPass(SerializedPass m_Passe, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms)
+        private static string ConvertSerializedPass(SerializedPass m_Passe, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms, Dictionary<(int PlatformIndex, int ChunkIndex), string> unknownChunkFallbacks)
         {
             var sb = new StringBuilder();
             switch (m_Passe.m_Type)
@@ -158,54 +255,54 @@ namespace AssetStudio
                 {
                     sb.Append(ConvertSerializedShaderState(m_Passe.m_State));
 
-                    if (m_Passe.progVertex.m_SubPrograms.Count > 0)
-                    {
-                        sb.Append("Program \"vp\" {\n");
-                        sb.Append(ConvertSerializedSubPrograms(m_Passe.progVertex.m_SubPrograms, platforms, shaderPrograms));
-                        sb.Append("}\n");
-                    }
-
-                    if (m_Passe.progFragment.m_SubPrograms.Count > 0)
-                    {
-                        sb.Append("Program \"fp\" {\n");
-                        sb.Append(ConvertSerializedSubPrograms(m_Passe.progFragment.m_SubPrograms, platforms, shaderPrograms));
-                        sb.Append("}\n");
-                    }
-
-                    if (m_Passe.progGeometry.m_SubPrograms.Count > 0)
-                    {
-                        sb.Append("Program \"gp\" {\n");
-                        sb.Append(ConvertSerializedSubPrograms(m_Passe.progGeometry.m_SubPrograms, platforms, shaderPrograms));
-                        sb.Append("}\n");
-                    }
-
-                    if (m_Passe.progHull.m_SubPrograms.Count > 0)
-                    {
-                        sb.Append("Program \"hp\" {\n");
-                        sb.Append(ConvertSerializedSubPrograms(m_Passe.progHull.m_SubPrograms, platforms, shaderPrograms));
-                        sb.Append("}\n");
-                    }
-
-                    if (m_Passe.progDomain.m_SubPrograms.Count > 0)
-                    {
-                        sb.Append("Program \"dp\" {\n");
-                        sb.Append(ConvertSerializedSubPrograms(m_Passe.progDomain.m_SubPrograms, platforms, shaderPrograms));
-                        sb.Append("}\n");
-                    }
-
-                    if (m_Passe.progRayTracing?.m_SubPrograms.Count > 0)
-                    {
-                        sb.Append("Program \"rtp\" {\n");
-                        sb.Append(ConvertSerializedSubPrograms(m_Passe.progRayTracing.m_SubPrograms, platforms, shaderPrograms));
-                        sb.Append("}\n");
-                    }
+                    sb.Append(ConvertPrograms(m_Passe.progVertex, "vp", platforms, shaderPrograms, unknownChunkFallbacks));
+                    sb.Append(ConvertPrograms(m_Passe.progFragment, "fp", platforms, shaderPrograms, unknownChunkFallbacks));
+                    sb.Append(ConvertPrograms(m_Passe.progGeometry, "gp", platforms, shaderPrograms, unknownChunkFallbacks));
+                    sb.Append(ConvertPrograms(m_Passe.progHull, "hp", platforms, shaderPrograms, unknownChunkFallbacks));
+                    sb.Append(ConvertPrograms(m_Passe.progDomain, "dp", platforms, shaderPrograms, unknownChunkFallbacks));
+                    sb.Append(ConvertPrograms(m_Passe.progRayTracing, "rtp", platforms, shaderPrograms, unknownChunkFallbacks));
                 }
                 sb.Append("}\n");
             }
             return sb.ToString();
         }
 
-        private static string ConvertSerializedSubPrograms(List<SerializedSubProgram> m_SubPrograms, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms)
+        private static string ConvertPrograms(SerializedProgram program, string programType, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms, Dictionary<(int PlatformIndex, int ChunkIndex), string> unknownChunkFallbacks)
+        {
+            var sb = new StringBuilder();
+            if (program?.m_SubPrograms?.Count > 0)
+            {
+                sb.Append($"Program \"{programType}\" {{\n");
+                sb.Append(ConvertSerializedSubPrograms(program.m_SubPrograms, platforms, shaderPrograms, unknownChunkFallbacks));
+                sb.Append("}\n");
+            }
+
+            var playerSubPrograms = FlattenPlayerSubPrograms(program);
+            if (playerSubPrograms.Count > 0)
+            {
+                sb.Append($"PlayerProgram \"{programType}\" {{\n");
+                sb.Append(ConvertSerializedPlayerSubPrograms(playerSubPrograms, platforms, shaderPrograms, unknownChunkFallbacks));
+                sb.Append("}\n");
+            }
+
+            return sb.ToString();
+        }
+
+        private static List<SerializedPlayerSubProgram> FlattenPlayerSubPrograms(SerializedProgram program)
+        {
+            if (program?.m_PlayerSubPrograms == null)
+            {
+                return new List<SerializedPlayerSubProgram>();
+            }
+
+            return program.m_PlayerSubPrograms
+                .Where(x => x != null)
+                .SelectMany(x => x)
+                .Where(x => x != null)
+                .ToList();
+        }
+
+        private static string ConvertSerializedSubPrograms(List<SerializedSubProgram> m_SubPrograms, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms, Dictionary<(int PlatformIndex, int ChunkIndex), string> unknownChunkFallbacks)
         {
             var sb = new StringBuilder();
             var groups = m_SubPrograms.GroupBy(x => x.m_BlobIndex);
@@ -214,30 +311,237 @@ namespace AssetStudio
                 var programs = group.GroupBy(x => x.m_GpuProgramType);
                 foreach (var program in programs)
                 {
-                    for (int i = 0; i < platforms.Length; i++)
+                    var platformIndex = FindPlatformIndex(platforms, program.Key);
+                    if (platformIndex < 0)
                     {
-                        var platform = platforms[i];
-                        if (CheckGpuProgramUsable(platform, program.Key))
+                        platformIndex = platforms.Length > 0 ? 0 : -1;
+                    }
+
+                    var platform = platformIndex >= 0 ? platforms[platformIndex] : ShaderCompilerPlatform.None;
+                    var subPrograms = program.ToList();
+                    var isTier = subPrograms.Count > 1;
+                    foreach (var subProgram in subPrograms)
+                    {
+                        sb.Append($"SubProgram \"{GetPlatformString(platform)} ");
+                        if (isTier)
                         {
-                            var subPrograms = program.ToList();
-                            var isTier = subPrograms.Count > 1;
-                            foreach (var subProgram in subPrograms)
-                            {
-                                sb.Append($"SubProgram \"{GetPlatformString(platform)} ");
-                                if (isTier)
-                                {
-                                    sb.Append($"hw_tier{subProgram.m_ShaderHardwareTier:00} ");
-                                }
-                                sb.Append("\" {\n");
-                                sb.Append(shaderPrograms[i].m_SubPrograms[subProgram.m_BlobIndex].Export());
-                                sb.Append("\n}\n");
-                            }
-                            break;
+                            sb.Append($"hw_tier{subProgram.m_ShaderHardwareTier:00} ");
                         }
+                        sb.Append("\" {\n");
+                        if (platformIndex < 0 ||
+                            shaderPrograms == null ||
+                            shaderPrograms.Length <= platformIndex ||
+                            shaderPrograms[platformIndex] == null ||
+                            shaderPrograms[platformIndex].m_SubPrograms == null ||
+                            shaderPrograms[platformIndex].m_SubPrograms.Length <= subProgram.m_BlobIndex ||
+                            shaderPrograms[platformIndex].m_SubPrograms[subProgram.m_BlobIndex] == null)
+                        {
+                            sb.Append("// subprogram decode unavailable\n");
+                            sb.Append($"// blob index: {subProgram.m_BlobIndex}\n");
+                            sb.Append($"// gpu program type: {subProgram.m_GpuProgramType}\n");
+                            sb.Append($"// platform: {GetPlatformString(platform)}");
+                            var fallback = FindUnknownChunkFallback(platformIndex, unknownChunkFallbacks);
+                            if (!string.IsNullOrWhiteSpace(fallback))
+                            {
+                                sb.Append("\n");
+                                sb.Append(fallback);
+                            }
+                        }
+                        else
+                        {
+                            try
+                            {
+                                sb.Append(shaderPrograms[platformIndex].m_SubPrograms[subProgram.m_BlobIndex].Export());
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Warning($"Shader subprogram export failed for platform '{platform}', blob {subProgram.m_BlobIndex}: {ex.Message}");
+                                sb.Append($"// subprogram export failed: {ex.Message}");
+                            }
+                        }
+                        sb.Append("\n}\n");
                     }
                 }
             }
             return sb.ToString();
+        }
+
+        private static string ConvertSerializedPlayerSubPrograms(List<SerializedPlayerSubProgram> m_SubPrograms, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms, Dictionary<(int PlatformIndex, int ChunkIndex), string> unknownChunkFallbacks)
+        {
+            var sb = new StringBuilder();
+            var groups = m_SubPrograms.GroupBy(x => x.m_BlobIndex);
+            foreach (var group in groups)
+            {
+                var programs = group.GroupBy(x => x.m_GpuProgramType);
+                foreach (var program in programs)
+                {
+                    var platformIndex = FindPlatformIndex(platforms, program.Key);
+                    if (platformIndex < 0)
+                    {
+                        platformIndex = platforms.Length > 0 ? 0 : -1;
+                    }
+
+                    var platform = platformIndex >= 0 ? platforms[platformIndex] : ShaderCompilerPlatform.None;
+                    foreach (var subProgram in program)
+                    {
+                        sb.Append($"SubProgram \"{GetPlatformString(platform)}\" {{\n");
+                        if (platformIndex < 0 ||
+                            shaderPrograms == null ||
+                            shaderPrograms.Length <= platformIndex ||
+                            shaderPrograms[platformIndex] == null ||
+                            shaderPrograms[platformIndex].m_SubPrograms == null ||
+                            shaderPrograms[platformIndex].m_SubPrograms.Length <= subProgram.m_BlobIndex ||
+                            shaderPrograms[platformIndex].m_SubPrograms[subProgram.m_BlobIndex] == null)
+                        {
+                            sb.Append($"// player subprogram decode unavailable\n");
+                            sb.Append($"// blob index: {subProgram.m_BlobIndex}\n");
+                            sb.Append($"// gpu program type: {subProgram.m_GpuProgramType}\n");
+                            sb.Append($"// shader requirements: 0x{subProgram.m_ShaderRequirements:X}\n");
+                            sb.Append($"// platform: {GetPlatformString(platform)}");
+                            var fallback = FindUnknownChunkFallback(platformIndex, unknownChunkFallbacks);
+                            if (!string.IsNullOrWhiteSpace(fallback))
+                            {
+                                sb.Append("\n");
+                                sb.Append(fallback);
+                            }
+                        }
+                        else
+                        {
+                            try
+                            {
+                                sb.Append(shaderPrograms[platformIndex].m_SubPrograms[subProgram.m_BlobIndex].Export());
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Warning($"Shader player subprogram export failed for platform '{platform}', blob {subProgram.m_BlobIndex}: {ex.Message}");
+                                sb.Append($"// player subprogram export failed: {ex.Message}");
+                            }
+                        }
+                        sb.Append("\n}\n");
+                    }
+                }
+            }
+            return sb.ToString();
+        }
+
+        private static int FindPlatformIndex(ShaderCompilerPlatform[] platforms, ShaderGpuProgramType programType)
+        {
+            if (platforms == null)
+            {
+                return -1;
+            }
+
+            for (int i = 0; i < platforms.Length; i++)
+            {
+                try
+                {
+                    if (CheckGpuProgramUsable(platforms[i], programType))
+                    {
+                        return i;
+                    }
+                }
+                catch
+                {
+                    // Fall back to first available platform when program type is newer than our mapping table.
+                }
+            }
+
+            return -1;
+        }
+
+        private static string FindUnknownChunkFallback(int platformIndex, Dictionary<(int PlatformIndex, int ChunkIndex), string> unknownChunkFallbacks)
+        {
+            if (platformIndex < 0 || unknownChunkFallbacks == null)
+            {
+                return null;
+            }
+
+            foreach (var pair in unknownChunkFallbacks)
+            {
+                if (pair.Key.PlatformIndex == platformIndex && !string.IsNullOrWhiteSpace(pair.Value))
+                {
+                    return pair.Value;
+                }
+            }
+
+            return null;
+        }
+
+        private static string TryExtractUnknownChunkPreview(byte[] blob, uint offset, uint compressedLength, ShaderCompilerPlatform platform)
+        {
+            if (blob == null || offset > int.MaxValue || compressedLength == 0 || compressedLength > int.MaxValue)
+            {
+                return null;
+            }
+
+            var start = (int)offset;
+            var length = (int)compressedLength;
+            if (start < 0 || start > blob.Length - length)
+            {
+                return null;
+            }
+
+            var slice = blob.AsSpan(start, length);
+
+            var dxbcIndex = FindSignature(slice, "DXBC"u8);
+            if (dxbcIndex >= 0 && dxbcIndex + 28 <= slice.Length)
+            {
+                var totalSize = BinaryPrimitives.ReadInt32LittleEndian(slice.Slice(dxbcIndex + 24, 4));
+                if (totalSize > 0 && dxbcIndex + totalSize <= slice.Length)
+                {
+                    try
+                    {
+                        var shaderBytes = slice.Slice(dxbcIndex, totalSize).ToArray();
+                        var shaderSpan = shaderBytes.AsSpan();
+                        var disassembly = Compiler.Disassemble(shaderSpan.GetPinnableReference(), shaderSpan.Length, DisasmFlags.None, "").AsString();
+                        if (!string.IsNullOrWhiteSpace(disassembly))
+                        {
+                            return $"// extracted DXBC chunk for {GetPlatformString(platform)}\n{disassembly}";
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            var spirvMagic = new byte[] { 0x03, 0x02, 0x23, 0x07 };
+            var spirvIndex = FindSignature(slice, spirvMagic);
+            if (spirvIndex >= 0)
+            {
+                try
+                {
+                    var spirvBytes = slice.Slice(spirvIndex).ToArray();
+                    var spirvText = SpirVShaderConverter.Convert(spirvBytes);
+                    if (!string.IsNullOrWhiteSpace(spirvText))
+                    {
+                        return $"// extracted SPIR-V chunk for {GetPlatformString(platform)}\n{spirvText}";
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return null;
+        }
+
+        private static int FindSignature(ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature)
+        {
+            if (signature.Length == 0 || data.Length < signature.Length)
+            {
+                return -1;
+            }
+
+            for (int i = 0; i <= data.Length - signature.Length; i++)
+            {
+                if (data.Slice(i, signature.Length).SequenceEqual(signature))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
         }
 
         private static string ConvertSerializedShaderState(SerializedShaderState m_State)
